@@ -1,0 +1,21 @@
+services:
+  nginx-rtmp:
+    build: 
+      context: .
+      args:
+        - USE_NVIDIA=true
+    ports:
+      - "1935:1935"  # RTMP
+      - "8080:8080"  # HTTP status page
+    env_file:
+      - .env
+    volumes:
+      - ./transcoding-templates:/etc/nginx/transcoding-templates
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped

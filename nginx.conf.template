@@ -1,0 +1,80 @@
+events {
+    worker_connections 4096;
+    use epoll;
+    multi_accept on;
+}
+
+rtmp {
+    server {
+        listen 1935;
+        chunk_size 4096;
+        max_message 1M;
+       
+        application live {
+            live on;
+            record off;
+           
+            buffer 10s;
+           
+            exec_push ffmpeg -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$name -c:v h264_nvenc -preset ${YOUTUBE_PRESET} -profile:v high -b:v ${YOUTUBE_BITRATE} -maxrate ${YOUTUBE_BITRATE} -bufsize ${YOUTUBE_BITRATE} -g ${YOUTUBE_GOP_SIZE} -keyint_min ${YOUTUBE_GOP_SIZE} -r ${YOUTUBE_FRAMERATE} -c:a copy -f flv ${YOUTUBE_URL}/${YOUTUBE_KEY};
+            
+            exec_push ffmpeg -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$name -c:v h264_nvenc -preset p1 -b:v ${TWITCH_BITRATE} -maxrate ${TWITCH_BITRATE} -bufsize ${TWITCH_BITRATE} -g ${TWITCH_GOP_SIZE} -keyint_min ${TWITCH_GOP_SIZE} -r ${TWITCH_FRAMERATE} -vf scale=1920:1080 -c:a copy -f flv ${TWITCH_URL}/${TWITCH_KEY};
+            
+            exec_push ffmpeg -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$name -c:v h264_nvenc -preset p1 -b:v ${KICK_BITRATE} -maxrate ${KICK_BITRATE} -bufsize ${KICK_BITRATE} -g ${KICK_GOP_SIZE} -keyint_min ${KICK_GOP_SIZE} -r ${KICK_FRAMERATE} -vf scale=1920:1080 -c:a copy -f flv ${KICK_URL}/${KICK_KEY};
+        }
+    }
+}
+
+http {
+    include mime.types;
+    default_type application/octet-stream;
+   
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    server_tokens off;
+   
+    directio 512;
+   
+    log_format streaming '[$time_local] $remote_addr';
+   
+    access_log /var/log/nginx/streaming.log streaming;
+   
+    server {
+        listen 8080;
+       
+        location /stat {
+            rtmp_stat all;
+            rtmp_stat_stylesheet stat.xsl;
+            add_header Refresh "3; $request_uri";
+        }
+       
+        location /stat.xsl {
+            root /var/www/html;
+        }
+       
+        location /control {
+            rtmp_control all;
+            internal;
+        }
+       
+        location /hls {
+            types {
+                application/vnd.apple.mpegurl m3u8;
+                video/mp2t ts;
+            }
+            root /tmp;
+            add_header Cache-Control no-cache;
+            add_header Access-Control-Allow-Origin *;
+        }
+       
+        location /nginx_status {
+            stub_status on;
+            access_log off;
+            allow 127.0.0.1;
+            deny all;
+        }
+    }
+}

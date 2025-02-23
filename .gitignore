@@ -1,0 +1,49 @@
+# Environment variables
+.env
+!.env.sample
+
+# Logs
+*.log
+logs/
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Build artifacts
+*.o
+*.so
+*.dll
+*.dylib
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Debug files
+debug/
+*.debug
+
+# SSL/TLS certificates (if any)
+*.pem
+*.key
+*.crt
+*.cer
+*.der
