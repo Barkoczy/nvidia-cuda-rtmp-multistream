@@ -58,6 +58,10 @@ docker compose exec -u root nginx-rtmp /bin/bash
 
 ## Platform-Specific Information
 
+### Youtube
+
+Reference: https://support.google.com/youtube/answer/2853702?hl=en-WS
+
 ### Twitch
 
 For getting Twitch ingest servers:
