@@ -16,7 +16,7 @@ rtmp {
            
             buffer 10s;
            
-            exec_push ffmpeg -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$name -c:v h264_nvenc -preset ${YOUTUBE_PRESET} -profile:v high -b:v ${YOUTUBE_BITRATE} -maxrate ${YOUTUBE_BITRATE} -bufsize ${YOUTUBE_BITRATE} -g ${YOUTUBE_GOP_SIZE} -keyint_min ${YOUTUBE_GOP_SIZE} -r ${YOUTUBE_FRAMERATE} -c:a copy -f flv ${YOUTUBE_URL}/${YOUTUBE_KEY};
+            exec_push ffmpeg -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$name -c:v hevc_nvenc -preset ${YOUTUBE_PRESET} -profile:v main -b:v ${YOUTUBE_BITRATE} -maxrate ${YOUTUBE_BITRATE} -bufsize ${YOUTUBE_BITRATE} -g ${YOUTUBE_GOP_SIZE} -keyint_min ${YOUTUBE_GOP_SIZE} -r ${YOUTUBE_FRAMERATE} -c:a copy -f flv ${YOUTUBE_URL}/${YOUTUBE_KEY};
             
             exec_push ffmpeg -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$name -c:v h264_nvenc -preset p1 -b:v ${TWITCH_BITRATE} -maxrate ${TWITCH_BITRATE} -bufsize ${TWITCH_BITRATE} -g ${TWITCH_GOP_SIZE} -keyint_min ${TWITCH_GOP_SIZE} -r ${TWITCH_FRAMERATE} -vf scale=1920:1080 -c:a copy -f flv ${TWITCH_URL}/${TWITCH_KEY};
             

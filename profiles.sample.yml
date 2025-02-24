@@ -1,0 +1,24 @@
+gaming:
+  youtube:
+    url: rtmp://a.rtmp.youtube.com/live2
+    bitrate: 40000k
+    framerate: 60
+    gopSize: 120
+    preset: fast
+    profile: main
+  twitch:
+    url: rtmp://live.twitch.tv/app
+    bitrate: 8000k
+    framerate: 60
+    gopSize: 120
+    preset: p1
+    profile: high
+    scale: 1920:1080
+  kick:
+    url: rtmp://live.twitch.tv/app
+    bitrate: 8000k
+    framerate: 60
+    gopSize: 120
+    preset: p1
+    profile: high
+    scale: 1920:1080

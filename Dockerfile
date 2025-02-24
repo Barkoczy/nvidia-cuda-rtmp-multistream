@@ -1,17 +1,4 @@
-FROM nvidia/cuda:12.3.1-devel-ubuntu22.04 AS nvidia-base
-
-# Inštalácia NVIDIA knižníc
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    nvidia-driver-535 \
-    cuda-drivers-535 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Vytvorenie symlinkov pre NVIDIA knižnice
-RUN ln -sf /usr/lib/x86_64-linux-gnu/libnvidia-encode.so.535 /usr/local/lib/libnvidia-encode.so.1 && \
-    ln -sf /usr/lib/x86_64-linux-gnu/libnvcuvid.so.535 /usr/local/lib/libnvcuvid.so.1
-
-# Nastavenie cesty ku knižniciam
-ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
+FROM nvidia/cuda:12.8.0-devel-ubuntu24.04 AS nvidia-base
 
 # Install basic dependencies
 RUN apt-get update && apt-get install -y \
@@ -47,27 +34,23 @@ RUN apt-get update && apt-get install -y \
     libxcb-xfixes0-dev \
     texinfo \
     zlib1g-dev \
-    cuda-nvcc-12-3 \
-    cuda-cudart-dev-12-3 \
+    cuda-nvcc-12-8 \
+    cuda-cudart-dev-12-8 \
     libssl-dev \
     openssl \
     gettext-base \
     && rm -rf /var/lib/apt/lists/*
 
-# Vytvorenie symlinkov pre NVIDIA knižnice
-RUN ln -sf /usr/lib/x86_64-linux-gnu/libnvidia-encode.so /usr/local/lib/libnvidia-encode.so.1 && \
-    ln -sf /usr/lib/x86_64-linux-gnu/libnvcuvid.so /usr/local/lib/libnvcuvid.so.1
-
-# Nastavenie cesty ku knižniciam
+# Nastavenie LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
 
 # Build NGINX with RTMP module from source
 WORKDIR /tmp
-RUN wget https://nginx.org/download/nginx-1.24.0.tar.gz && \
-    tar zxf nginx-1.24.0.tar.gz && \
+RUN wget https://nginx.org/download/nginx-1.26.1.tar.gz && \
+    tar zxf nginx-1.26.1.tar.gz && \
     wget https://github.com/arut/nginx-rtmp-module/archive/master.zip && \
     unzip master.zip && \
-    cd nginx-1.24.0 && \
+    cd nginx-1.26.1 && \
     ./configure \
         --prefix=/usr/local/nginx \
         --with-http_ssl_module \
@@ -78,9 +61,9 @@ RUN wget https://nginx.org/download/nginx-1.24.0.tar.gz && \
     make -j$(nproc) && \
     make install
 
-# Install NVIDIA SDK Components
-RUN wget https://github.com/FFmpeg/nv-codec-headers/releases/download/n12.1.14.0/nv-codec-headers-12.1.14.0.tar.gz \
-    && tar xf nv-codec-headers-12.1.14.0.tar.gz \
+# Install NVIDIA SDK Components - aktualizácia na najnovšiu dostupnú verziu 13.0.19.0
+RUN wget https://github.com/FFmpeg/nv-codec-headers/releases/download/n13.0.19.0/nv-codec-headers-13.0.19.0.tar.gz \
+    && tar xf nv-codec-headers-13.0.19.0.tar.gz \
     && cd nv-codec-headers-* \
     && make install \
     && cd .. \
@@ -129,9 +112,6 @@ RUN wget https://raw.githubusercontent.com/arut/nginx-rtmp-module/master/stat.xs
 
 # Copy configuration files
 COPY nginx.conf.template /usr/local/nginx/conf/nginx.conf.template
-
-# Set up configuration files
-COPY transcoding-templates /usr/local/nginx/conf/transcoding-templates
 COPY entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
