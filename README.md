@@ -73,7 +73,7 @@ PROFILE_SERVICE_KEY
 ```
 Example: For profile "gaming" and service "youtube", the key will be loaded from `GAMING_YOUTUBE_KEY`
 
-**### YouTube RTMP Stream Settings - YAML Configuration Table**
+### YouTube RTMP Stream Settings - YAML Configuration Table
 | **Setting**        | **Resolution**   | **Framerate** | **gopSize** | **Video Bitrate**     | **Example YAML**                        |
 |--------------------|------------------|---------------|-------------|-----------------------|-----------------------------------------|
 | `url`              | -                | -             | -           | -                     | `rtmp://a.rtmp.youtube.com/live2`       |
@@ -111,7 +111,7 @@ Example: For profile "gaming" and service "youtube", the key will be loaded from
 | `scale`            | 720p             | 60 fps        | 120         | 8 Mbps                | `scale: 1280x720`                       |
 | `scale`            | 240p - 720p      | 30 fps        | 60          | 8 Mbps                | `scale: 1280x720`                       |
 
-**### YAML configuration example for YouTube with NVIDIA NVENC:**
+### YAML configuration example for YouTube with NVIDIA NVENC:
 ```yaml
 youtube:
   url: rtmp://a.rtmp.youtube.com/live2
