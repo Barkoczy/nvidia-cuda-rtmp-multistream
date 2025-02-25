@@ -26,6 +26,14 @@ gaming:
     preset: fast
     profile: high
     scale: 1920:1080
+  x:
+    url: rtmp://rtmp.x.com/live
+    bitrate: 12000k
+    framerate: 60
+    gopSize: 180
+    preset: fast
+    profile: high
+    scale: 1280:720
 
 events:
   youtube:

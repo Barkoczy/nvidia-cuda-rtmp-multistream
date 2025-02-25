@@ -64,7 +64,6 @@ chmod -R 755 /var/log/broadcaster
 
 # Saving all environment variables to /etc/broadcaster/.env
 echo "Exporting environment variables to /etc/broadcaster/.env..."
-# env | grep -vE '^(PWD|HOME|TERM|SHLVL|PATH|_|OLDPWD)' > /etc/broadcaster/.env
 env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' > /etc/broadcaster/.env
 chmod 644 /etc/broadcaster/.env
 chown broadcaster:broadcaster /etc/broadcaster/.env
