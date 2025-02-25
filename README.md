@@ -5,107 +5,105 @@ A Docker-based NGINX RTMP server leveraging NVIDIA GPU hardware acceleration for
 ## Features
 
 - Simultaneous streaming to multiple platforms
-- NVIDIA GPU (Required)
-- NVIDIA Driver version 450.80.02 or higher
-- NVIDIA Container Toolkit
 - NVIDIA GPU hardware acceleration (NVENC)
-- Windows 10/11 or Linux with NVIDIA GPU support
-- Configurable streaming quality per platform
-- Low-latency streaming options
-- Docker containerization
+- Profile-based configuration system
+- Automatic stream key management
+- Log rotation and management
+- Real-time stream monitoring
+- GPU-accelerated video transcoding
 - Automatic fallback to CPU encoding if GPU is unavailable
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- NVIDIA GPU with compatible drivers (optional, for hardware acceleration)
-- NVIDIA Container Toolkit (for GPU support)
-
-## Hardware Acceleration
-
-This project utilizes:
-- NVIDIA NVENC encoder
-- CUDA acceleration
-- Hardware-based video processing
+- NVIDIA GPU with compatible drivers
+- NVIDIA Container Toolkit
+- NVIDIA Driver version 450.80.02 or higher
 
 ## Quick Start
 
-1. Copy `.env.sample` to `.env` and configure your streaming keys:
+1. Copy configuration files:
 ```bash
 cp .env.sample .env
+cp profiles.yml.sample profiles.yml
 ```
 
-2. Edit `.env` file with your platform-specific streaming keys and URLs
+2. Configure your streaming keys in .env:
+```
+GAMING_YOUTUBE_KEY=your_youtube_key
+GAMING_TWITCH_KEY=your_twitch_key
+GAMING_KICK_KEY=your_kick_key
+```
 
 3. Start the container:
 ```bash
 docker compose up -d
 ```
 
-## Existing Commands
-
-```bash
-docker compose exec -u root nginx-rtmp /bin/bash
-```
-
-```bash
-/usr/local/nginx/sbin/nginx
-```
-
-```
-/usr/local/nginx/sbin/nginx -s reload
-```
-
-## Platform-Specific Information
-
-### Twitch
-
-For getting Twitch ingest servers:
-
-```bash
-curl -X GET 'https://ingest.twitch.tv/ingests' 
-```
-
-Reference: https://dev.twitch.tv/docs/video-broadcast/reference/#get-ingest-servers
-
 ## Configuration
 
-### Stream Quality Settings
+### Profile System
 
-Default quality settings per platform:
+Profiles are configured in profiles.yml. Each profile can have multiple streaming services:
 
-- YouTube: 1080p60 at 51Mbps
-- Twitch: 1080p60 at 8Mbps
-- Kick: 1080p60 at 8Mbps
+```yaml
+profile_name:
+  youtube:
+    url: rtmp://a.rtmp.youtube.com/live2
+    bitrate: 40000k
+    framerate: 60
+    gopSize: 120
+    preset: fast
+    profile: main
+  twitch:
+    url: rtmps://prg03.contribute.live-video.net/app
+    bitrate: 8000k
+    framerate: 60
+    gopSize: 120
+    preset: fast
+    profile: high
+    scale: 1920:1080
+```
 
-### Transcoding Templates
+### Stream Keys
 
-Located in `/transcoding-templates/`:
-- youtube-4k.conf
-- youtube-1080p.conf
-- twitch.conf
-- kick.conf
-- low-latency.conf
-- backup-720p.conf
+Stream keys are loaded from environment variables using the naming convention:
+```
+PROFILE_SERVICE_KEY
+```
+Example: For profile "gaming" and service "youtube", the key will be loaded from `GAMING_YOUTUBE_KEY`
 
 ## Monitoring
 
-Access the NGINX RTMP status page at:
+1. RTMP Statistics:
 ```
 http://localhost:8080/stat
 ```
 
-## Troubleshooting
-
-1. Check NGINX logs:
-```bash
-docker compose logs nginx-rtmp
+2. Log Files:
+```
+http://localhost:8080/logs
 ```
 
-2. Monitor GPU usage:
+3. Stream Status:
+```bash
+docker compose logs -f nginx-rtmp
+```
+
+## GPU Monitoring
+
+Check GPU utilization:
 ```bash
 docker compose exec nginx-rtmp nvidia-smi
 ```
+
+## Log Management
+
+Logs are automatically rotated with these settings:
+- Rotation: Daily
+- Maximum size: 50MB
+- Compression: Enabled
+- Retention: 3 days
 
 ## License
 

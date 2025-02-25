@@ -1,30 +1,18 @@
 #!/bin/bash
-# Load environment variables from .env file if it exists
-if [ -f "/.env" ]; then
-    export $(cat /.env | grep -v '^#' | xargs)
-fi
+set -e
 
-# Verify required environment variables
-required_vars=(
-    "YOUTUBE_KEY" "TWITCH_KEY" "KICK_KEY"
-    "YOUTUBE_URL" "TWITCH_URL" "KICK_URL"
-    "YOUTUBE_BITRATE" "YOUTUBE_FRAMERATE" "YOUTUBE_GOP_SIZE" "YOUTUBE_PRESET"
-    "TWITCH_BITRATE" "TWITCH_FRAMERATE" "TWITCH_GOP_SIZE"
-    "KICK_BITRATE" "KICK_FRAMERATE" "KICK_GOP_SIZE"
-)
+# Clean up any existing FFmpeg processes
+echo "Checking and terminating any existing FFmpeg processes..."
+pkill -9 ffmpeg 2>/dev/null || true
 
-for var in "${required_vars[@]}"; do
-    if [ -z "${!var}" ]; then
-        echo "Error: Required environment variable $var is not set"
-        exit 1
-    fi
-done
+# Clean up any existing PID files
+rm -f /var/log/broadcaster/*.pid
 
 # Automatic detection and setup of NVIDIA libraries
 if which nvidia-smi > /dev/null 2>&1; then
     echo "NVIDIA GPU detected - enabling hardware acceleration"
     export NVIDIA_VISIBLE_DEVICES=all
-    export NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    export NVIDIA_DRIVER_CAPABILITIES=all
     
     # Detecting the driver version
     DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n 1)
@@ -61,17 +49,32 @@ else
     echo "Warning: No NVIDIA GPU detected - falling back to CPU encoding"
 fi
 
-# Define variables for envsubst
-VARS='${YOUTUBE_URL} ${YOUTUBE_KEY} ${TWITCH_URL} ${TWITCH_KEY} ${KICK_URL} ${KICK_KEY} ${YOUTUBE_PRESET} ${YOUTUBE_BITRATE} ${YOUTUBE_GOP_SIZE} ${YOUTUBE_FRAMERATE} ${TWITCH_BITRATE} ${TWITCH_GOP_SIZE} ${TWITCH_FRAMERATE} ${KICK_BITRATE} ${KICK_GOP_SIZE} ${KICK_FRAMERATE}'
-
-# Generate final nginx configuration from template
-envsubst "$VARS" < /usr/local/nginx/conf/nginx.conf.template > /usr/local/nginx/conf/nginx.conf
-
 # Print diagnostic information
 echo "FFmpeg version:"
 ffmpeg -version | head -n 1
+
+# NVIDIA library check
 echo "NVIDIA libraries in LD_LIBRARY_PATH:"
-ldconfig -p | grep nvidia
+ldconfig -p | grep nvidia || echo "No NVIDIA libraries found in path"
+
+# Set up the Broadcaster user
+chown -R broadcaster:broadcaster /var/log/broadcaster /etc/broadcaster
+chmod 755 /usr/local/bin/broadcaster
+chmod -R 755 /var/log/broadcaster
+
+# Saving all environment variables to /etc/broadcaster/.env
+echo "Exporting environment variables to /etc/broadcaster/.env..."
+# env | grep -vE '^(PWD|HOME|TERM|SHLVL|PATH|_|OLDPWD)' > /etc/broadcaster/.env
+env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' > /etc/broadcaster/.env
+chmod 644 /etc/broadcaster/.env
+chown broadcaster:broadcaster /etc/broadcaster/.env
+
+# Start cron service for log rotation
+service cron start
+
+# Print diagnostic information
+echo "Setting up log rotation..."
+logrotate --debug /etc/logrotate.d/broadcaster
 
 # Start nginx
 echo "Starting NGINX RTMP server..."

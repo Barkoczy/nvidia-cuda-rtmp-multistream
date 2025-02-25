@@ -1,0 +1,15 @@
+/var/log/broadcaster/*.log {
+  daily
+  rotate 3
+  compress
+  missingok
+  notifempty
+  create 0644 broadcaster broadcaster
+  size 50M
+  dateext
+  dateformat -%Y%m%d
+  su broadcaster broadcaster
+  postrotate
+    echo "Broadcaster logs rotated at $(date)" >> /var/log/broadcaster/rotation.log
+  endscript
+}

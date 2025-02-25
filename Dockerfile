@@ -39,29 +39,21 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     openssl \
     gettext-base \
+    logrotate \
+    cron \
     && rm -rf /var/lib/apt/lists/*
 
-# Nastavenie LD_LIBRARY_PATH
+# Setting LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
 
-# Build NGINX with RTMP module from source
-WORKDIR /tmp
-RUN wget https://nginx.org/download/nginx-1.26.1.tar.gz && \
-    tar zxf nginx-1.26.1.tar.gz && \
-    wget https://github.com/arut/nginx-rtmp-module/archive/master.zip && \
-    unzip master.zip && \
-    cd nginx-1.26.1 && \
-    ./configure \
-        --prefix=/usr/local/nginx \
-        --with-http_ssl_module \
-        --with-http_v2_module \
-        --with-http_stub_status_module \
-        --with-http_realip_module \
-        --add-module=../nginx-rtmp-module-master && \
-    make -j$(nproc) && \
-    make install
+# Setup logrotate configuration
+COPY broadcaster-logrotate /etc/logrotate.d/broadcaster
 
-# Install NVIDIA SDK Components - aktualizácia na najnovšiu dostupnú verziu 13.0.19.0
+# Enable cron service for logrotate
+RUN chmod 644 /etc/logrotate.d/broadcaster && \
+    echo "0 0 * * * /usr/sbin/logrotate /etc/logrotate.d/broadcaster --force" >> /etc/crontab
+
+# Install NVIDIA SDK Components (nv-codec-headers)
 RUN wget https://github.com/FFmpeg/nv-codec-headers/releases/download/n13.0.19.0/nv-codec-headers-13.0.19.0.tar.gz \
     && tar xf nv-codec-headers-13.0.19.0.tar.gz \
     && cd nv-codec-headers-* \
@@ -102,18 +94,53 @@ RUN git clone https://git.ffmpeg.org/ffmpeg.git . \
     && make install \
     && rm -rf /tmp/ffmpeg
 
+# Build NGINX with RTMP module from source
+WORKDIR /tmp
+RUN wget https://nginx.org/download/nginx-1.26.1.tar.gz && \
+    tar zxf nginx-1.26.1.tar.gz && \
+    wget https://github.com/arut/nginx-rtmp-module/archive/master.zip && \
+    unzip master.zip && \
+    cd nginx-1.26.1 && \
+    ./configure \
+        --prefix=/usr/local/nginx \
+        --with-http_ssl_module \
+        --with-http_v2_module \
+        --with-http_stub_status_module \
+        --with-http_realip_module \
+        --add-module=../nginx-rtmp-module-master && \
+    make -j$(nproc) && \
+    make install
+
+# Install YQ for YAML processing
+RUN wget https://github.com/mikefarah/yq/releases/download/v4.35.1/yq_linux_amd64 -O /usr/bin/yq && \
+    chmod +x /usr/bin/yq
+
 # Create necessary directories
 RUN mkdir -p /var/log/nginx && \
-    mkdir -p /var/www/html
+    mkdir -p /var/www/html && \
+    mkdir -p /var/log/broadcaster && \
+    mkdir -p /etc/broadcaster
 
 # Download and setup stat.xsl for RTMP statistics
 RUN wget https://raw.githubusercontent.com/arut/nginx-rtmp-module/master/stat.xsl \
     -O /var/www/html/stat.xsl
 
 # Copy configuration files
-COPY nginx.conf.template /usr/local/nginx/conf/nginx.conf.template
+COPY nginx.conf /usr/local/nginx/conf/nginx.conf
+COPY broadcaster /usr/local/bin/broadcaster
+COPY profiles.yml /etc/broadcaster/profiles.yml
 COPY entrypoint.sh /entrypoint.sh
 
+# Create a broadcaster user and set permissions
+RUN groupadd -r broadcaster && useradd -r -g broadcaster broadcaster
+RUN usermod -a -G video broadcaster
+
+# Set permissions for files and directories
+RUN chown -R broadcaster:broadcaster /var/log/broadcaster /etc/broadcaster
+RUN chmod -R 755 /var/log/broadcaster
+RUN chmod 644 /etc/broadcaster/profiles.yml
+
+# Set proper permissions
 RUN chmod +x /entrypoint.sh
 
 # Expose ports

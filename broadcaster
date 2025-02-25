@@ -1,0 +1,273 @@
+#!/bin/bash
+set -e
+
+# Retrieves variables if /etc/broadcaster/.env exists
+if [ -f "/etc/broadcaster/.env" ]; then
+    export $(grep -v '^#' /etc/broadcaster/.env | xargs)
+    echo "Environment variables loaded from /etc/broadcaster/.env"
+else
+    echo "Warning: /etc/broadcaster/.env not found!"
+fi
+
+# Configuration paths
+CONFIG_FILE="/etc/broadcaster/profiles.yml"
+LOG_DIR="/var/log/broadcaster"
+
+# Clean up old logs (keep logs for 3 days)
+find "$LOG_DIR" -name "*.log" -type f -mtime +3 -delete
+
+# Ensure log directory exists with proper permissions
+mkdir -p "$LOG_DIR"
+
+# Add debugging information for environment
+echo "=== Broadcaster Debug Info $(date) ===" >> "$LOG_DIR/debug.log"
+echo "User: $(whoami)" >> "$LOG_DIR/debug.log"
+echo "PATH: $PATH" >> "$LOG_DIR/debug.log"
+echo "Arguments: $@" >> "$LOG_DIR/debug.log"
+
+# Set PATH to include common binary locations
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
+# Process command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --profile)
+      PROFILE="$2"
+      shift 2
+      ;;
+    --stop)
+      STOP_MODE=true
+      shift
+      ;;
+    *)
+      echo "Unknown parameter: $1" | tee -a "$LOG_DIR/debug.log"
+      exit 1
+      ;;
+  esac
+done
+
+# Check if profile was provided
+if [ -z "$PROFILE" ]; then
+  echo "Error: No profile specified. Use --profile PROFILE_NAME" | tee -a "$LOG_DIR/debug.log"
+  exit 1
+fi
+
+# Set up log file with timestamp
+LOG_FILE="$LOG_DIR/${PROFILE}_$(date +%Y%m%d_%H%M%S).log"
+touch "$LOG_FILE"
+
+# Check if configuration file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "Error: Configuration file $CONFIG_FILE not found" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  exit 1
+fi
+
+# Function to stop streams for a profile
+stop_streams() {
+  local profile=$1
+  echo "Stopping streams for profile: $profile" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  
+  # Find all PID files for the given profile
+  for pid_file in "$LOG_DIR/${profile}"_*.pid; do
+    if [ -f "$pid_file" ]; then
+      local pid=$(cat "$pid_file")
+      local service=$(basename "$pid_file" | sed "s/${profile}_\(.*\)\.pid/\1/")
+      
+      echo "Stopping stream for service $service (PID: $pid)" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+      
+      # Check if process exists
+      if /bin/kill -0 $pid 2>/dev/null; then
+        # Try to terminate process gracefully first
+        /bin/kill -TERM $pid
+        
+        # Wait up to 5 seconds
+        for i in {1..5}; do
+          if ! /bin/kill -0 $pid 2>/dev/null; then
+            break
+          fi
+          /bin/sleep 1
+        done
+        
+        # If process is still running, force kill
+        if /bin/kill -0 $pid 2>/dev/null; then
+          echo "Process $pid still running, force killing" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+          /bin/kill -9 $pid
+        fi
+      else
+        echo "Process $pid is not running" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+      fi
+      
+      # Remove PID file
+      rm -f "$pid_file"
+    fi
+  done
+  
+  # Remove active flag file
+  rm -f "$LOG_DIR/${profile}.active"
+  
+  echo "All streams for profile $profile have been stopped" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+}
+
+# If script was called with --stop, only stop streams and exit
+if [ "$STOP_MODE" = true ]; then
+  stop_streams "$PROFILE"
+  exit 0
+fi
+
+# Stop any existing streams for this profile before starting new ones
+stop_streams "$PROFILE"
+
+echo "Starting broadcaster for profile: $PROFILE" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+
+# Check if yq is installed
+if ! command -v /usr/bin/yq &> /dev/null; then
+  echo "Error: Tool 'yq' is not installed or not in PATH" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  exit 1
+fi
+
+# Check if profile exists in configuration
+if ! /usr/bin/yq e ".$PROFILE" "$CONFIG_FILE" | grep -q -v "null"; then
+  echo "Error: Profile '$PROFILE' not found in configuration file" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  exit 1
+fi
+
+# Function to start FFmpeg stream for a specific service
+start_stream() {
+  local service=$1
+  local url
+  local key
+  local bitrate
+  local framerate
+  local gopsize
+  local preset
+  local profile_type
+  local scale_filter=""
+
+  # Check if service exists in profile configuration
+  if ! /usr/bin/yq e ".$PROFILE.$service" "$CONFIG_FILE" | grep -q -v "null"; then
+    echo "Skipping service '$service', not configured for profile '$PROFILE'" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    return 0
+  fi
+
+  # Get service configuration
+  url=$(/usr/bin/yq e ".$PROFILE.$service.url" "$CONFIG_FILE")
+  bitrate=$(/usr/bin/yq e ".$PROFILE.$service.bitrate" "$CONFIG_FILE")
+  framerate=$(/usr/bin/yq e ".$PROFILE.$service.framerate" "$CONFIG_FILE")
+  gopsize=$(/usr/bin/yq e ".$PROFILE.$service.gopSize" "$CONFIG_FILE")
+  preset=$(/usr/bin/yq e ".$PROFILE.$service.preset" "$CONFIG_FILE")
+  profile_type=$(/usr/bin/yq e ".$PROFILE.$service.profile" "$CONFIG_FILE")
+  
+  # Check if scale is defined
+  local scale=$(/usr/bin/yq e ".$PROFILE.$service.scale" "$CONFIG_FILE")
+  if [[ "$scale" != "null" && ! -z "$scale" ]]; then
+    scale_filter="-vf scale=$scale"
+  fi
+  
+  # Debug output for service configuration
+  echo "Service configuration for $service:" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  echo "  URL: $url" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  echo "  Bitrate: $bitrate" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  echo "  Framerate: $framerate" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  echo "  GOP Size: $gopsize" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  echo "  Preset: $preset" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  echo "  Profile: $profile_type" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  
+  # Generate key variable name using convention PROFILE_SERVICE_KEY
+  local key_var=$(echo "${PROFILE}_${service}_KEY" | tr '[:lower:]' '[:upper:]')
+  
+  # Output the key variable name for debugging
+  echo "Looking for key in environment variable: $key_var" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  
+  # Get key from environment variable
+  key=${!key_var}
+  if [ -z "$key" ]; then
+    echo "Error: Environment variable $key_var not set for service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    
+    # Fallback to fixed keys for testing if needed
+    if [ "$service" == "youtube" ]; then
+      key=${YOUTUBE_KEY:-""}
+    elif [ "$service" == "twitch" ]; then
+      key=${TWITCH_KEY:-""}
+    elif [ "$service" == "kick" ]; then
+      key=${KICK_KEY:-""}
+    fi
+    
+    if [ -z "$key" ]; then
+      echo "No fallback key found, skipping service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+      return 1
+    else
+      echo "Using fallback key for service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    fi
+  fi
+  
+  # Check for required values
+  if [ -z "$url" ] || [ -z "$bitrate" ] || [ -z "$framerate" ] || [ -z "$gopsize" ]; then
+    echo "Error: Missing required configuration values for service '$service'" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    return 1
+  fi
+
+  # Select codec and profile based on service
+  if [ "$service" == "youtube" ]; then
+    # YouTube uses hevc_nvenc for 4K streams
+    codec="hevc_nvenc"
+    codec_profile="$profile_type"
+    output_url="${url}/${key}"
+  elif [ "$service" == "twitch" ] || [ "$service" == "kick" ]; then
+    # Twitch and Kick require h264
+    codec="h264_nvenc"
+    codec_profile="$profile_type"
+    output_url="${url}/${key}"
+  else
+    # Generic case for other services
+    codec="h264_nvenc"
+    codec_profile="high"
+    output_url="${url}/${key}"
+  fi
+
+  echo "Starting stream for service: $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  echo "Parameters: codec=$codec, profile=$codec_profile, bitrate=$bitrate, fps=$framerate" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  if [ ! -z "$scale_filter" ]; then
+    echo "Using scale filter: $scale_filter" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  fi
+  
+  # Launch FFmpeg with appropriate configuration and redirect logs
+  (
+    # Create a safe URL for logging by hiding the key
+    safe_url="${url}/XXXXXX" # Hide the key in logs
+    echo "Starting stream for service $service to $safe_url" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    
+    # Using -loglevel warning to reduce log volume
+    /usr/bin/ffmpeg -y -loglevel warning -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$PROFILE \
+      -c:v $codec -preset $preset -profile:v $codec_profile \
+      -b:v $bitrate -maxrate $bitrate -bufsize $bitrate \
+      -g $gopsize -keyint_min $gopsize \
+      -r $framerate \
+      $scale_filter \
+      -c:a aac -ar 44100 -b:a 128k \
+      -f flv $output_url >> "$LOG_FILE" 2>&1 &
+    
+    # Save process PID
+    pid=$!
+    echo $pid > "$LOG_DIR/${PROFILE}_${service}.pid"
+    echo "Stream started with PID: $pid" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  )
+  
+  echo "Stream for service $service started (PID: $(cat "$LOG_DIR/${PROFILE}_${service}.pid"))" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+}
+
+# Start streams for all configured services
+echo "Starting streams for profile $PROFILE..." | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+
+# Get list of all services configured for this profile
+services=$(/usr/bin/yq e ".$PROFILE | keys" "$CONFIG_FILE" | sed 's/^- //g')
+
+echo "Configured services: $services" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+
+for service in $services; do
+  start_stream "$service"
+done
+
+echo "All streams for profile $PROFILE have been started" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+
+# Create active flag file
+touch "$LOG_DIR/${PROFILE}.active"
