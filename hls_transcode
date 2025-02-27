@@ -44,21 +44,32 @@ fi
 cleanup "$name"
 
 # Run the FFmpeg process in the background
-/usr/bin/ffmpeg -y -loglevel warning -hwaccel cuda -hwaccel_output_format cuda -i rtmp://localhost:1935/live/$name \
-  -c:v h264_nvenc -preset p1 -tune ll -b:v:0 8000k -b:v:1 3000k -b:v:2 1500k \
+/usr/bin/ffmpeg -y -loglevel warning -hwaccel cuda -hwaccel_output_format cuda -i rtmp://localhost:1935/live/${name} \
+  -c:v h264_nvenc -preset p1 -tune ll -rc cbr -bf 0 -threads 8 \
+  -b:v:0 8000k -maxrate:v:0 8000k -bufsize:v:0 8000k \
+  -b:v:1 3000k -maxrate:v:1 3000k -bufsize:v:1 3000k \
+  -b:v:2 1500k -maxrate:v:2 1500k -bufsize:v:2 1500k \
   -filter_complex "[0:v]split=3[v1][v2][v3];[v1]scale_cuda=1920:1080[high];[v2]scale_cuda=1280:720[medium];[v3]scale_cuda=854:480[low]" \
   -map "[high]" -map "[medium]" -map "[low]" -map 0:a \
-  -g 60 -keyint_min 60 \
+  -g 60 -keyint_min 60 -forced-idr 1 -spatial-aq 1 -zerolatency 1 \
   -c:a aac -ar 48000 -b:a 128k \
-  -var_stream_map "v:0,name:high v:1,name:medium v:2,name:low a:0,agroup:audio" \
   -f hls \
-  -hls_time 5 \
-  -hls_list_size 10 \
-  -hls_flags delete_segments+append_list \
+  -hls_time 4 \
+  -hls_list_size 12 \
+  -hls_delete_threshold 3 \
+  -hls_flags delete_segments+independent_segments \
   -hls_segment_type fmp4 \
   -hls_fmp4_init_filename init_${name}_%v.mp4 \
+  -init_seg_name init_${name}_%v.mp4 \
   -master_pl_name ${name}.m3u8 \
   -hls_segment_filename /tmp/hls/${name}_%v_%03d.m4s \
+  -var_stream_map "v:0,name:high v:1,name:medium v:2,name:low a:0,agroup:audio" \
+  -max_muxing_queue_size 2048 \
+  -reset_timestamps 1 \
+  -fflags +genpts \
+  -avoid_negative_ts make_zero \
+  -movflags +faststart+frag_keyframe \
+  -muxdelay 0 -muxpreload 0 \
   /tmp/hls/${name}_%v.m3u8 > /dev/null 2>&1 &
 
 # Save PID to file
