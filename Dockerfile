@@ -118,6 +118,8 @@ RUN wget https://github.com/mikefarah/yq/releases/download/v4.35.1/yq_linux_amd6
 # Create necessary directories
 RUN mkdir -p /var/log/nginx && \
     mkdir -p /var/www/html && \
+    mkdir -p /tmp/hls && \
+    mkdir -p /tmp/hls_pid && \
     mkdir -p /var/log/broadcaster && \
     mkdir -p /etc/broadcaster
 
@@ -126,9 +128,10 @@ RUN wget https://raw.githubusercontent.com/arut/nginx-rtmp-module/master/stat.xs
     -O /var/www/html/stat.xsl
 
 # Copy configuration files
+COPY profiles.yml /etc/broadcaster/profiles.yml
 COPY nginx.conf /usr/local/nginx/conf/nginx.conf
 COPY broadcaster /usr/local/bin/broadcaster
-COPY profiles.yml /etc/broadcaster/profiles.yml
+COPY hls_transcode /usr/local/bin/hls_transcode
 COPY entrypoint.sh /entrypoint.sh
 
 # Create a broadcaster user and set permissions
@@ -137,8 +140,13 @@ RUN usermod -a -G video broadcaster
 
 # Set permissions for files and directories
 RUN chown -R broadcaster:broadcaster /var/log/broadcaster /etc/broadcaster
-RUN chmod -R 755 /var/log/broadcaster
+RUN chown -R broadcaster:broadcaster /tmp/hls_pid /tmp/hls 
 RUN chmod 644 /etc/broadcaster/profiles.yml
+RUN chmod 755 /usr/local/bin/broadcaster
+RUN chmod 755 /usr/local/bin/hls_transcode
+RUN chmod -R 755 /var/log/broadcaster
+RUN chmod -R 755 /tmp/hls_pid
+RUN chmod -R 755 /tmp/hls
 
 # Set proper permissions
 RUN chmod +x /entrypoint.sh

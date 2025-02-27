@@ -24,8 +24,8 @@ A Docker-based NGINX RTMP server leveraging NVIDIA GPU hardware acceleration for
 
 1. Copy configuration files:
 ```bash
-cp .env.sample .env
-cp profiles.yml.sample profiles.yml
+cp .env.example .env
+cp profiles.yml.example profiles.yml
 ```
 
 2. Configure your streaming keys in .env:

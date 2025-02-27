@@ -1,0 +1,66 @@
+#!/bin/bash
+
+name=$1
+action=$2
+
+# Function for file cleanup and process termination
+cleanup() {
+    local stream=$1
+    
+    # Exit the FFmpeg process, if any
+    if [ -f "/tmp/hls_pid/$stream.pid" ]; then
+        pid=$(cat "/tmp/hls_pid/$stream.pid")
+        if kill -0 $pid 2>/dev/null; then
+            echo "Stopping FFmpeg process for stream $stream (PID: $pid)"
+            kill $pid
+            # Wait for the completion of the process
+            timeout=10
+            while kill -0 $pid 2>/dev/null && [ $timeout -gt 0 ]; do
+                sleep 1
+                timeout=$((timeout - 1))
+            done
+            # If still running, terminate forcefully
+            if kill -0 $pid 2>/dev/null; then
+                echo "Force killing FFmpeg process for stream $stream (PID: $pid)"
+                kill -9 $pid
+            fi
+        fi
+        rm -f "/tmp/hls_pid/$stream.pid"
+    fi
+    
+    # Delete all files for a stream
+    echo "Removing files for stream $stream"
+    rm -f /tmp/hls/${stream}* /tmp/hls/init_${stream}*
+}
+
+# Stop action - terminate the process and clean the files
+if [ "$action" = "stop" ]; then
+    cleanup "$name"
+    exit 0
+fi
+
+# Action start (or no action) - start FFmpeg
+# First terminate any existing process
+cleanup "$name"
+
+# Run the FFmpeg process in the background
+/usr/bin/ffmpeg -y -loglevel warning -hwaccel cuda -hwaccel_output_format cuda -i rtmp://localhost:1935/live/$name \
+  -c:v h264_nvenc -preset p1 -tune ll -b:v:0 8000k -b:v:1 3000k -b:v:2 1500k \
+  -filter_complex "[0:v]split=3[v1][v2][v3];[v1]scale_cuda=1920:1080[high];[v2]scale_cuda=1280:720[medium];[v3]scale_cuda=854:480[low]" \
+  -map "[high]" -map "[medium]" -map "[low]" -map 0:a \
+  -g 60 -keyint_min 60 \
+  -c:a aac -ar 48000 -b:a 128k \
+  -var_stream_map "v:0,name:high v:1,name:medium v:2,name:low a:0,agroup:audio" \
+  -f hls \
+  -hls_time 5 \
+  -hls_list_size 10 \
+  -hls_flags delete_segments+append_list \
+  -hls_segment_type fmp4 \
+  -hls_fmp4_init_filename init_${name}_%v.mp4 \
+  -master_pl_name ${name}.m3u8 \
+  -hls_segment_filename /tmp/hls/${name}_%v_%03d.m4s \
+  /tmp/hls/${name}_%v.m3u8 > /dev/null 2>&1 &
+
+# Save PID to file
+echo $! > "/tmp/hls_pid/$name.pid"
+echo "Started FFmpeg for stream $name (PID: $!)"

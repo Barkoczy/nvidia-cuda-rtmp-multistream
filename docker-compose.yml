@@ -1,12 +1,12 @@
 services:
   nginx-rtmp:
-    build: 
+    build:
       context: .
       args:
         - USE_NVIDIA=true
     ports:
-      - "1935:1935"  # RTMP
-      - "8080:8080"  # HTTP status page
+      - "1935:1935" # RTMP
+      - "8080:8080" # HTTP status page
     env_file:
       - .env
     environment:
@@ -23,3 +23,15 @@ services:
               count: 1
               capabilities: [gpu]
     restart: unless-stopped
+
+  svelte-player:
+    build:
+      context: ./svelte-player
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+    ports:
+      - "${SVELTE_PORT:-3000}:3000"
+    depends_on:
+      - nginx-rtmp
+    restart: always

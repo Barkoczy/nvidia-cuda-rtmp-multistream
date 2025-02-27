@@ -57,11 +57,6 @@ ffmpeg -version | head -n 1
 echo "NVIDIA libraries in LD_LIBRARY_PATH:"
 ldconfig -p | grep nvidia || echo "No NVIDIA libraries found in path"
 
-# Set up the Broadcaster user
-chown -R broadcaster:broadcaster /var/log/broadcaster /etc/broadcaster
-chmod 755 /usr/local/bin/broadcaster
-chmod -R 755 /var/log/broadcaster
-
 # Saving all environment variables to /etc/broadcaster/.env
 echo "Exporting environment variables to /etc/broadcaster/.env..."
 env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' > /etc/broadcaster/.env
