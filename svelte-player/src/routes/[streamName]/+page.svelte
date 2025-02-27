@@ -23,6 +23,7 @@
 	let hlsInstance: Hls | null = null;
 	let isLoading = true;
 	let hasError = false;
+	let recoveryAttempts: { [key: string]: number } = {}; // Track recovery attempts for different error types
 	let errorMessage = '';
 	let isPlaying = false;
 	let isMuted = false;
@@ -35,6 +36,7 @@
 	let bufferEnd = 0;
 	let qualityLevels: { id: number; height: number; bitrate: number }[] = [];
 	let currentQuality = 'auto';
+	let lastInitializedStream = '';
 
 	// Responsive player settings
 	let containerWidth: number;
@@ -65,23 +67,48 @@
 				hlsInstance = null;
 			}
 
-			// Create new HLS instance with low latency options
+			// Create new HLS instance with optimized stability settings
 			hlsInstance = new Hls({
-				enableWorker: true,
-				lowLatencyMode: true,
-				backBufferLength: 30,
-				liveSyncDuration: 1,
-				liveMaxLatencyDuration: 5,
-				liveDurationInfinity: true,
-				highBufferWatchdogPeriod: 1,
-				fragLoadingTimeOut: 20000,
-				manifestLoadingTimeOut: 20000,
-				levelLoadingTimeOut: 20000,
-				maxMaxBufferLength: 30,
-				maxBufferLength: 60,
-				maxBufferSize: 60 * 1000 * 1000,
-				startLevel: -1,
-				autoStartLoad: true
+				enableWorker: true, // Enables web worker for background processing
+				lowLatencyMode: false, // Disabled for better stability
+				backBufferLength: 120, // Larger buffer for rewind capability (seconds)
+				liveSyncDuration: 12, // Target buffer ahead of current position (seconds)
+				liveMaxLatencyDuration: 60, // Maximum latency allowed before catching up
+				liveDurationInfinity: true, // Treats live streams as having infinite duration
+				highBufferWatchdogPeriod: 8, // How often to check if player is stuck (seconds)
+				fragLoadingTimeOut: 90000, // Timeout for fragment loading (ms)
+				manifestLoadingTimeOut: 90000, // Timeout for playlist/manifest loading (ms)
+				levelLoadingTimeOut: 90000, // Timeout for level playlist loading (ms)
+				maxBufferLength: 300, // Maximum buffer length in seconds
+				maxBufferSize: 150 * 1000 * 1000, // Maximum buffer size in bytes (150MB)
+				startLevel: -1, // Start with auto quality selection
+				autoStartLoad: true, // Automatically start loading media
+				maxMaxBufferLength: 600, // Absolute maximum buffer length (seconds)
+
+				// Adaptive Bitrate strategy parameters
+				abrEwmaDefaultEstimate: 1000000, // Default bandwidth estimate (bits/s)
+				abrEwmaFastLive: 2.0, // Fast averaging weight (slower adaptation)
+				abrEwmaSlowLive: 15.0, // Slow averaging weight (more stable quality)
+				startFragPrefetch: true, // Prefetch first fragment for faster startup
+
+				// Error recovery parameters
+				nudgeMaxRetry: 20, // Maximum attempts to recover from stalls
+				nudgeOffset: 0.5, // How far to skip forward when recovering (seconds)
+				maxFragLookUpTolerance: 0.5, // Tolerance when matching media to fragments (seconds)
+				maxLoadingDelay: 8, // Max time to wait before abandoning slow fragment (seconds)
+
+				// Additional stability parameters
+				maxStarvationDelay: 8000, // Maximum delay before starvation (ms)
+				// Removed maxLevelCappingDelay as it does not exist in HlsConfig
+				fragLoadPolicy: {
+					default: {
+						maxTimeToFirstByteMs: 30000, // Maximum time to first byte of fragment
+						maxLoadTimeMs: 180000, // Maximum time to load fragment
+						timeoutRetry: { maxNumRetry: 3, retryDelayMs: 1000, maxRetryDelayMs: 5000 }, // Number of retries for timeout errors
+						errorRetry: { maxNumRetry: 3, retryDelayMs: 1000, maxRetryDelayMs: 5000 } // Number of retries for other errors
+					}
+				},
+				appendErrorMaxRetry: 5 // Maximum retries when appending segments
 			});
 
 			// Add event listeners
@@ -102,6 +129,18 @@
 					}));
 				}
 
+				// Detekcia mobilných zariadení
+				const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+					navigator.userAgent
+				);
+
+				// Nastavenie počiatočnej kvality pre mobilné zariadenia
+				if (isMobile && hlsInstance) {
+					hlsInstance.startLevel = 2; // Nastaví najnižšiu kvalitu pre mobilné zariadenia
+					// Prípadne môžeme nastaviť aj nižší volume
+					if (videoRef) videoRef.volume = 0.5;
+				}
+
 				videoRef.play().catch((error) => {
 					console.error('Auto-play failed:', error);
 					// Try with muted if autoplay fails
@@ -113,28 +152,51 @@
 
 			hlsInstance.on(Hls.Events.ERROR, (event, data) => {
 				console.error('HLS error:', data);
-				if (data.fatal) {
+
+				// If not fatal, just log and continue
+				if (!data.fatal) {
+					// Special handling for bufferStalledError
+					if (data.details === 'bufferStalledError') {
+						// Hide buffering indicator after short delay
+						setTimeout(() => {
+							isBuffering = false;
+						}, 1000);
+					}
+					console.log('Non-fatal error, continuing playback');
+					return;
+				}
+
+				// Set recovery attempt counter for different error types
+				const maxRecoveryAttempts = 3;
+				const recoveryKey = `${data.type}_${data.details}`;
+				recoveryAttempts[recoveryKey] = (recoveryAttempts[recoveryKey] || 0) + 1;
+
+				if (recoveryAttempts[recoveryKey] <= maxRecoveryAttempts) {
 					switch (data.type) {
 						case Hls.ErrorTypes.NETWORK_ERROR:
-							// Try to recover network error
-							console.log('Fatal network error, trying to recover');
-							if (hlsInstance) {
-								hlsInstance.startLoad();
-							}
+							console.log(
+								`Recovery attempt ${recoveryAttempts[recoveryKey]}/${maxRecoveryAttempts} for network error`
+							);
+							hlsInstance?.startLoad();
 							break;
 						case Hls.ErrorTypes.MEDIA_ERROR:
-							console.log('Fatal media error, trying to recover');
-							if (hlsInstance) {
-								hlsInstance.recoverMediaError();
-							}
+							console.log(
+								`Recovery attempt ${recoveryAttempts[recoveryKey]}/${maxRecoveryAttempts} for media error`
+							);
+							hlsInstance?.recoverMediaError();
 							break;
 						default:
-							// Cannot recover
+							// Unrecoverable error
 							hasError = true;
 							errorMessage = `Fatal error: ${data.details}`;
 							hlsInstance?.destroy();
 							break;
 					}
+				} else {
+					// We've exhausted recovery attempts
+					hasError = true;
+					errorMessage = `Could not recover after ${maxRecoveryAttempts} attempts: ${data.details}`;
+					hlsInstance?.destroy();
 				}
 			});
 
@@ -260,6 +322,9 @@
 		} else {
 			initPlayer();
 		}
+
+		// Reset recovery attempts counter
+		recoveryAttempts = {};
 	}
 
 	// Event handlers
@@ -328,8 +393,9 @@
 		cleanupEventListeners();
 	});
 
-	// Watch for stream name changes
-	$: if (streamName && videoRef) {
+	// Watch for stream name changes and re-initialize player
+	$: if (streamName && videoRef && streamName !== lastInitializedStream) {
+		lastInitializedStream = streamName;
 		initPlayer();
 	}
 </script>
