@@ -1,0 +1,52 @@
+networks:
+  traefik-network:
+    external: true
+  internal-network:
+    driver: bridge
+    internal: true
+
+services:
+  nginx-rtmp:
+    build:
+      context: .
+      args:
+        - USE_NVIDIA=true
+    expose:
+      - "1935" # RTMP
+      - "8080" # HTTP status page
+    ports:
+      - "1935:1935"
+    env_file:
+      - .env
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    volumes:
+      - ./logs:/var/log/broadcaster
+      - ./profiles.yml:/etc/broadcaster/profiles.yml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - traefik-network
+      - internal-network
+    restart: unless-stopped
+    
+  svelte-player:
+    build:
+      context: ./svelte-player
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+    expose:
+      - "3000"
+    depends_on:
+      - nginx-rtmp
+    networks:
+      - traefik-network
+      - internal-network
+    restart: always
