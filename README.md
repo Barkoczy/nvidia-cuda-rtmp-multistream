@@ -11,7 +11,6 @@ A Docker-based NGINX RTMP server leveraging NVIDIA GPU hardware acceleration for
 - Log rotation and management
 - Real-time stream monitoring
 - GPU-accelerated video transcoding
-- Automatic fallback to CPU encoding if GPU is unavailable
 
 ## Prerequisites
 

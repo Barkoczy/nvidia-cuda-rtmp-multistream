@@ -35,18 +35,3 @@ services:
       - traefik-network
       - internal-network
     restart: unless-stopped
-    
-  svelte-player:
-    build:
-      context: ./svelte-player
-      dockerfile: Dockerfile
-    environment:
-      NODE_ENV: production
-    expose:
-      - "3000"
-    depends_on:
-      - nginx-rtmp
-    networks:
-      - traefik-network
-      - internal-network
-    restart: always

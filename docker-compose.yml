@@ -23,15 +23,3 @@ services:
               count: 1
               capabilities: [gpu]
     restart: unless-stopped
-
-  svelte-player:
-    build:
-      context: ./svelte-player
-      dockerfile: Dockerfile
-    environment:
-      NODE_ENV: production
-    ports:
-      - "${SVELTE_PORT:-3000}:3000"
-    depends_on:
-      - nginx-rtmp
-    restart: always
