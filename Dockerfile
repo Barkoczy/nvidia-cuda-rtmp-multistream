@@ -140,7 +140,8 @@ RUN usermod -a -G video broadcaster
 
 # Set permissions for files and directories
 RUN chown -R broadcaster:broadcaster /var/log/broadcaster /etc/broadcaster
-RUN chown -R broadcaster:broadcaster /tmp/hls_pid /tmp/hls 
+RUN chown -R broadcaster:broadcaster /tmp/hls_pid /tmp/hls
+RUN chown broadcaster:broadcaster /usr/local/bin/broadcaster /usr/local/bin/hls_transcode
 RUN chmod 644 /etc/broadcaster/profiles.yml
 RUN chmod 755 /usr/local/bin/broadcaster
 RUN chmod 755 /usr/local/bin/hls_transcode

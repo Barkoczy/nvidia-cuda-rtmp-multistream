@@ -22,8 +22,17 @@ mkdir -p "$LOG_DIR"
 # Add debugging information for environment
 echo "=== Broadcaster Debug Info $(date) ===" >> "$LOG_DIR/debug.log"
 echo "User: $(whoami)" >> "$LOG_DIR/debug.log"
+echo "UID: $(id -u)" >> "$LOG_DIR/debug.log"
+echo "GID: $(id -g)" >> "$LOG_DIR/debug.log"
+echo "Groups: $(id -G)" >> "$LOG_DIR/debug.log"
 echo "PATH: $PATH" >> "$LOG_DIR/debug.log"
 echo "Arguments: $@" >> "$LOG_DIR/debug.log"
+echo "Working directory: $(pwd)" >> "$LOG_DIR/debug.log"
+echo "Environment variables:" >> "$LOG_DIR/debug.log"
+env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' | sed 's/=.*/=XXXXX/' >> "$LOG_DIR/debug.log"
+echo "File permissions:" >> "$LOG_DIR/debug.log"
+ls -la "$CONFIG_FILE" >> "$LOG_DIR/debug.log" 2>&1
+ls -la "$LOG_DIR" >> "$LOG_DIR/debug.log" 2>&1
 
 # Set PATH to include common binary locations
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
@@ -66,20 +75,20 @@ fi
 stop_streams() {
   local profile=$1
   echo "Stopping streams for profile: $profile" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-  
+
   # Find all PID files for the given profile
   for pid_file in "$LOG_DIR/${profile}"_*.pid; do
     if [ -f "$pid_file" ]; then
       local pid=$(cat "$pid_file")
       local service=$(basename "$pid_file" | sed "s/${profile}_\(.*\)\.pid/\1/")
-      
+
       echo "Stopping stream for service $service (PID: $pid)" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-      
+
       # Check if process exists
       if /bin/kill -0 $pid 2>/dev/null; then
         # Try to terminate process gracefully first
         /bin/kill -TERM $pid
-        
+
         # Wait up to 5 seconds
         for i in {1..5}; do
           if ! /bin/kill -0 $pid 2>/dev/null; then
@@ -87,7 +96,7 @@ stop_streams() {
           fi
           /bin/sleep 1
         done
-        
+
         # If process is still running, force kill
         if /bin/kill -0 $pid 2>/dev/null; then
           echo "Process $pid still running, force killing" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
@@ -96,15 +105,15 @@ stop_streams() {
       else
         echo "Process $pid is not running" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
       fi
-      
+
       # Remove PID file
       rm -f "$pid_file"
     fi
   done
-  
+
   # Remove active flag file
   rm -f "$LOG_DIR/${profile}.active"
-  
+
   echo "All streams for profile $profile have been stopped" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
 }
 
@@ -156,13 +165,13 @@ start_stream() {
   gopsize=$(/usr/bin/yq e ".$PROFILE.$service.gopSize" "$CONFIG_FILE")
   preset=$(/usr/bin/yq e ".$PROFILE.$service.preset" "$CONFIG_FILE")
   profile_type=$(/usr/bin/yq e ".$PROFILE.$service.profile" "$CONFIG_FILE")
-  
+
   # Check if scale is defined
   local scale=$(/usr/bin/yq e ".$PROFILE.$service.scale" "$CONFIG_FILE")
   if [[ "$scale" != "null" && ! -z "$scale" ]]; then
     scale_filter="-vf scale=$scale"
   fi
-  
+
   # Debug output for service configuration
   echo "Service configuration for $service:" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   echo "  URL: $url" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
@@ -171,18 +180,18 @@ start_stream() {
   echo "  GOP Size: $gopsize" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   echo "  Preset: $preset" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   echo "  Profile: $profile_type" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-  
+
   # Generate key variable name using convention PROFILE_SERVICE_KEY
   local key_var=$(echo "${PROFILE}_${service}_KEY" | tr '[:lower:]' '[:upper:]')
-  
+
   # Output the key variable name for debugging
   echo "Looking for key in environment variable: $key_var" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-  
+
   # Get key from environment variable
   key=${!key_var}
   if [ -z "$key" ]; then
     echo "Error: Environment variable $key_var not set for service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-    
+
     # Fallback to fixed keys for testing if needed
     if [ "$service" == "youtube" ]; then
       key=${YOUTUBE_KEY:-""}
@@ -191,7 +200,7 @@ start_stream() {
     elif [ "$service" == "kick" ]; then
       key=${KICK_KEY:-""}
     fi
-    
+
     if [ -z "$key" ]; then
       echo "No fallback key found, skipping service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
       return 1
@@ -199,7 +208,7 @@ start_stream() {
       echo "Using fallback key for service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
     fi
   fi
-  
+
   # Check for required values
   if [ -z "$url" ] || [ -z "$bitrate" ] || [ -z "$framerate" ] || [ -z "$gopsize" ]; then
     echo "Error: Missing required configuration values for service '$service'" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
@@ -229,13 +238,13 @@ start_stream() {
   if [ ! -z "$scale_filter" ]; then
     echo "Using scale filter: $scale_filter" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   fi
-  
+
   # Launch FFmpeg with appropriate configuration and redirect logs
   (
     # Create a safe URL for logging by hiding the key
     safe_url="${url}/XXXXXX" # Hide the key in logs
     echo "Starting stream for service $service to $safe_url" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-    
+
     # Using -loglevel warning to reduce log volume
     /usr/bin/ffmpeg -y -loglevel warning -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$PROFILE \
       -c:v $codec -preset $preset -profile:v $codec_profile \
@@ -245,13 +254,13 @@ start_stream() {
       $scale_filter \
       -c:a aac -ar 44100 -b:a 128k \
       -f flv $output_url >> "$LOG_FILE" 2>&1 &
-    
+
     # Save process PID
     pid=$!
     echo $pid > "$LOG_DIR/${PROFILE}_${service}.pid"
     echo "Stream started with PID: $pid" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   )
-  
+
   echo "Stream for service $service started (PID: $(cat "$LOG_DIR/${PROFILE}_${service}.pid"))" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
 }
 
