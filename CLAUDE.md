@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Docker-based NGINX RTMP server that restreams to multiple platforms simultaneously (YouTube, Twitch, Kick, X/Twitter) using NVIDIA GPU hardware acceleration (NVENC). The system uses a profile-based configuration where each profile can broadcast to multiple services with different encoding settings.
 
-**Current Branch**: `feature/phase1-security`
-**Status**: Phase 1 security hardening complete, Phase 2 observability stack implemented
+**Current Branch**: `feature/phase2-nginx-metrics`
+**Status**: ✅ Phase 1 security hardening COMPLETE (10/10 tests passed), Phase 2 observability stack implemented
 
 ## Architecture
 

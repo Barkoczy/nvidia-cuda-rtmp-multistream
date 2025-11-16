@@ -6,12 +6,23 @@ services:
       dockerfile: Dockerfile
     container_name: webhook-staging
     restart: unless-stopped
-    ports:
-      - "8090:8090"  # Webhook API endpoint
+    # NO external ports - internal Docker network only
+    expose:
+      - "8090"
     environment:
       - WEBHOOK_PORT=8090
     networks:
       - streaming
+    # Security: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/health"]
       interval: 30s
@@ -113,9 +124,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    env_file:
+      - .env.grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
     volumes:
