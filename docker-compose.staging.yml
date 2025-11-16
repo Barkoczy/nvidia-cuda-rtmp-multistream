@@ -217,6 +217,8 @@ services:
     image: sophos/nginx-vts-exporter:latest
     container_name: nginx-vts-exporter-staging
     restart: unless-stopped
+    environment:
+      - NGINX_STATUS=http://nginx-rtmp-staging:8080/status/format/json
     command:
       - '-nginx.scrape_uri=http://nginx-rtmp-staging:8080/status/format/json'
     ports:
