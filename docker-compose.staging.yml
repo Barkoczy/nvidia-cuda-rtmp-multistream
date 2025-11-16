@@ -1,0 +1,26 @@
+services:
+  nginx-rtmp-staging:
+    build:
+      context: .
+      args:
+        - USE_NVIDIA=true
+    ports:
+      - "1936:1935" # RTMP (staging)
+      - "8081:8080" # HTTP status page (staging)
+    container_name: nginx-rtmp-staging
+    env_file:
+      - .env
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    volumes:
+      - ./logs-staging:/var/log/broadcaster
+      - ./profiles.yml:/etc/broadcaster/profiles.yml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped

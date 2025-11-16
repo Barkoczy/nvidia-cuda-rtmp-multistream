@@ -1,0 +1,25 @@
+services:
+  nginx-rtmp:
+    build:
+      context: .
+      args:
+        - USE_NVIDIA=true
+    ports:
+      - "1935:1935" # RTMP
+      - "8080:8080" # HTTP status page
+    env_file:
+      - .env
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    volumes:
+      - ./logs:/var/log/broadcaster
+      - ./profiles.yml:/etc/broadcaster/profiles.yml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
