@@ -1,0 +1,99 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Docker container logs
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Container name
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+
+      # Container image
+      - source_labels: ['__meta_docker_container_image']
+        target_label: 'image'
+
+      # Compose project
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'compose_project'
+
+      # Compose service
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+
+    pipeline_stages:
+      # Parse JSON logs if present
+      - json:
+          expressions:
+            level: level
+            msg: msg
+            timestamp: ts
+
+      # Extract log level
+      - labels:
+          level:
+
+      # Timestamp parsing
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+  # Broadcaster logs from mounted volume
+  - job_name: broadcaster
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: broadcaster
+          __path__: /var/log/broadcaster/*.log
+
+    pipeline_stages:
+      # Extract profile from filename
+      - regex:
+          expression: '.*\/(?P<profile>[^_]+)_.*\.log'
+
+      - labels:
+          profile:
+
+      # Parse log lines
+      - regex:
+          expression: '^\[(?P<timestamp>.*?)\] (?P<level>\w+): (?P<message>.*)'
+
+      - labels:
+          level:
+
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05'
+
+  # NGINX access logs
+  - job_name: nginx
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx
+          __path__: /var/log/nginx/*.log
+
+    pipeline_stages:
+      # Parse NGINX log format
+      - regex:
+          expression: '^\[(?P<timestamp>.*?)\] (?P<remote_addr>\S+) (?P<status>\d+) (?P<request_time>[\d.]+)'
+
+      - labels:
+          status:
+
+      - timestamp:
+          source: timestamp
+          format: '02/Jan/2006:15:04:05 -0700'

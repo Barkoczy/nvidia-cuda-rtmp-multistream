@@ -1,0 +1,70 @@
+# GPU Alert Rules
+groups:
+  - name: gpu_alerts
+    interval: 30s
+    rules:
+      # High GPU utilization
+      - alert: HighGPUUtilization
+        expr: DCGM_FI_DEV_GPU_UTIL > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "High GPU utilization on {{ $labels.instance }}"
+          description: "GPU utilization is {{ $value }}% (threshold: 85%)"
+
+      # Critical GPU utilization
+      - alert: CriticalGPUUtilization
+        expr: DCGM_FI_DEV_GPU_UTIL > 95
+        for: 2m
+        labels:
+          severity: critical
+          component: gpu
+        annotations:
+          summary: "Critical GPU utilization on {{ $labels.instance }}"
+          description: "GPU utilization is {{ $value }}% (threshold: 95%)"
+
+      # High GPU memory usage
+      - alert: HighGPUMemory
+        expr: (DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "High GPU memory usage on {{ $labels.instance }}"
+          description: "GPU memory usage is {{ $value }}% (threshold: 80%)"
+
+      # GPU temperature warning
+      - alert: HighGPUTemperature
+        expr: DCGM_FI_DEV_GPU_TEMP > 80
+        for: 3m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "High GPU temperature on {{ $labels.instance }}"
+          description: "GPU temperature is {{ $value }}°C (threshold: 80°C)"
+
+      # GPU temperature critical
+      - alert: CriticalGPUTemperature
+        expr: DCGM_FI_DEV_GPU_TEMP > 85
+        for: 1m
+        labels:
+          severity: critical
+          component: gpu
+        annotations:
+          summary: "Critical GPU temperature on {{ $labels.instance }}"
+          description: "GPU temperature is {{ $value }}°C (threshold: 85°C)"
+
+      # NVENC session limit approaching
+      - alert: NVENCSessionLimitApproaching
+        expr: DCGM_FI_DEV_ENC_UTIL > 90
+        for: 2m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "NVENC encoder sessions approaching limit"
+          description: "NVENC utilization is {{ $value }}% (GTX 1060 has 8-session limit)"

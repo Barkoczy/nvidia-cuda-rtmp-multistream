@@ -1,0 +1,70 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'staging'
+    cluster: 'rtmp-multistream'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Webhook service
+  - job_name: 'webhook'
+    static_configs:
+      - targets: ['webhook:8090']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Node exporter (host metrics)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'rtmp-host'
+
+  # cAdvisor (container metrics)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 10s
+    metric_relabel_configs:
+      # Keep only container metrics we care about
+      - source_labels: [__name__]
+        regex: 'container_(cpu|memory|network|fs).*'
+        action: keep
+
+  # NVIDIA GPU metrics (DCGM exporter)
+  - job_name: 'gpu'
+    static_configs:
+      - targets: ['dcgm-exporter:9400']
+    scrape_interval: 5s  # GPU metrics change frequently
+
+  # NGINX RTMP metrics
+  - job_name: 'nginx-rtmp'
+    static_configs:
+      - targets: ['nginx-rtmp-exporter:9113']
+    scrape_interval: 10s
+
+  # FFmpeg metrics (if exporter is implemented)
+  - job_name: 'ffmpeg'
+    static_configs:
+      - targets: ['ffmpeg-exporter:9101']
+    scrape_interval: 10s
+    honor_labels: true  # Preserve labels from exporter

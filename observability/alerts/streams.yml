@@ -1,0 +1,51 @@
+# Stream Health Alert Rules
+groups:
+  - name: stream_alerts
+    interval: 30s
+    rules:
+      # No FFmpeg processes running when stream is active
+      - alert: FFmpegProcessMissing
+        expr: |
+          (nginx_rtmp_connections_active > 0)
+          and
+          (absent(container_processes{name=~".*ffmpeg.*"}) or container_processes{name=~".*ffmpeg.*"} == 0)
+        for: 1m
+        labels:
+          severity: critical
+          component: streaming
+        annotations:
+          summary: "FFmpeg process missing while stream is active"
+          description: "RTMP connection active but no FFmpeg processes running"
+
+      # RTMP connection dropped
+      - alert: RTMPConnectionDropped
+        expr: rate(nginx_rtmp_connections_dropped_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: rtmp
+        annotations:
+          summary: "RTMP connections being dropped"
+          description: "{{ $value }} connections dropped per second"
+
+      # Webhook unhealthy
+      - alert: WebhookUnhealthy
+        expr: up{job="webhook"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: webhook
+        annotations:
+          summary: "Webhook service is down"
+          description: "Webhook service unreachable - new streams cannot start"
+
+      # High stream latency (if metric available)
+      - alert: HighStreamLatency
+        expr: ffmpeg_stream_latency_seconds > 10
+        for: 3m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "High stream latency detected"
+          description: "Stream {{ $labels.profile }}/{{ $labels.service }} latency is {{ $value }}s"
