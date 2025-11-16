@@ -28,8 +28,6 @@ services:
       - "1936:1935" # RTMP (staging)
       - "8081:8080" # HTTP status page (staging)
     container_name: nginx-rtmp-staging
-    env_file:
-      - .env
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: all
@@ -38,6 +36,11 @@ services:
       - ./profiles.yml:/etc/broadcaster/profiles.yml:ro
       - ./nginx.staging.conf:/usr/local/nginx/conf/nginx.conf:ro
       - /tmp/hls:/tmp/hls
+    secrets:
+      - gaming_youtube_key
+      - gaming_twitch_key
+      - gaming_kick_key
+      - gaming_x_key
     deploy:
       resources:
         reservations:
@@ -51,6 +54,16 @@ services:
     depends_on:
       webhook:
         condition: service_healthy
+
+secrets:
+  gaming_youtube_key:
+    file: ./secrets/gaming_youtube_key.txt
+  gaming_twitch_key:
+    file: ./secrets/gaming_twitch_key.txt
+  gaming_kick_key:
+    file: ./secrets/gaming_kick_key.txt
+  gaming_x_key:
+    file: ./secrets/gaming_x_key.txt
 
 networks:
   streaming:
