@@ -56,10 +56,10 @@ scrape_configs:
       - targets: ['dcgm-exporter:9400']
     scrape_interval: 5s  # GPU metrics change frequently
 
-  # NGINX RTMP metrics
+  # NGINX RTMP metrics (VTS exporter)
   - job_name: 'nginx-rtmp'
     static_configs:
-      - targets: ['nginx-rtmp-exporter:9113']
+      - targets: ['nginx-vts-exporter:9913']
     scrape_interval: 10s
 
   # FFmpeg metrics (if exporter is implemented)

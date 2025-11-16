@@ -46,6 +46,13 @@ usage() {
     echo "    container_cpu         - Container CPU usage"
     echo "    ffmpeg_count          - Number of FFmpeg processes"
     echo ""
+    echo "  NGINX RTMP Metrics:"
+    echo "    rtmp_active_streams   - Active RTMP streams"
+    echo "    rtmp_bandwidth        - RTMP bandwidth out (bytes/s)"
+    echo "    rtmp_bytes_in         - RTMP bytes in rate"
+    echo "    rtmp_bytes_out        - RTMP bytes out rate"
+    echo "    rtmp_connections      - RTMP connections"
+    echo ""
     echo "LogQL Queries (Loki):"
     echo "    nginx_logs            - All NGINX logs"
     echo "    nginx_rtmp            - NGINX RTMP connections"
@@ -184,6 +191,23 @@ case "$QUERY_NAME" in
         ;;
     ffmpeg_count)
         query_prometheus 'count(container_processes{name=~".*ffmpeg.*"})'
+        ;;
+
+    # NGINX RTMP Metrics (VTS)
+    rtmp_active_streams)
+        query_prometheus 'nginx_vts_server_requests_total{host="*"}'
+        ;;
+    rtmp_bandwidth)
+        query_prometheus 'sum(rate(nginx_vts_server_bytes_total{direction="out"}[1m]))'
+        ;;
+    rtmp_bytes_in)
+        query_prometheus 'sum(rate(nginx_vts_server_bytes_total{direction="in"}[1m]))'
+        ;;
+    rtmp_bytes_out)
+        query_prometheus 'sum(rate(nginx_vts_server_bytes_total{direction="out"}[1m]))'
+        ;;
+    rtmp_connections)
+        query_prometheus 'nginx_vts_server_connections{host="*"}'
         ;;
 
     # Loki Queries

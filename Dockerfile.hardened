@@ -69,7 +69,7 @@ FROM nvidia-base AS ffmpeg-builder
 
 WORKDIR /build
 
-RUN git clone --depth 1 --branch n7.2 https://github.com/FFmpeg/FFmpeg.git
+RUN git clone --depth 1 --branch release/7.1 https://github.com/FFmpeg/FFmpeg.git
 
 WORKDIR /build/FFmpeg
 
@@ -103,7 +103,8 @@ WORKDIR /build
 
 RUN wget https://nginx.org/download/nginx-1.25.3.tar.gz \
     && tar -xzvf nginx-1.25.3.tar.gz \
-    && git clone https://github.com/arut/nginx-rtmp-module.git
+    && git clone https://github.com/arut/nginx-rtmp-module.git \
+    && git clone https://github.com/vozlt/nginx-module-vts.git
 
 WORKDIR /build/nginx-1.25.3
 
@@ -115,6 +116,7 @@ RUN ./configure \
     --with-http_stub_status_module \
     --with-threads \
     --add-module=../nginx-rtmp-module \
+    --add-module=../nginx-module-vts \
     && make -j$(nproc) \
     && make install
 
@@ -146,6 +148,13 @@ RUN apt-get update && apt-get install -y \
     logrotate \
     cron \
     procps \
+    libxcb1 \
+    libxcb-shm0 \
+    libxcb-xfixes0 \
+    libxcb-shape0 \
+    libasound2t64 \
+    libsdl2-2.0-0 \
+    libsndio7.0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binaries from builder stages
@@ -155,8 +164,9 @@ COPY --from=nginx-builder /usr/local/nginx /usr/local/nginx
 COPY --from=yq-installer /usr/bin/yq /usr/bin/yq
 
 # Create broadcaster user with specific UID/GID (non-root)
-RUN groupadd -g 1000 broadcaster && \
-    useradd -u 1000 -g broadcaster -s /bin/bash -m broadcaster && \
+# Note: UID/GID 1000 already exists as 'ubuntu' in base image, so we use different IDs
+RUN groupadd -g 1001 broadcaster && \
+    useradd -u 1001 -g broadcaster -s /bin/bash -m broadcaster && \
     usermod -a -G video broadcaster
 
 # Create writable directories with proper ownership
@@ -198,7 +208,9 @@ RUN chmod 755 /usr/local/bin/broadcaster \
     chmod 644 /etc/broadcaster/profiles.yml
 
 # Create stat.xsl for NGINX RTMP stats
-RUN mkdir -p /var/www/html && \
+# Note: wget is not available in runtime image, install it first
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /var/www/html && \
     wget -O /var/www/html/stat.xsl https://raw.githubusercontent.com/arut/nginx-rtmp-module/master/stat.xsl
 
 # Setting LD_LIBRARY_PATH
