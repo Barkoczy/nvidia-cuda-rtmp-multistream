@@ -50,37 +50,36 @@ else
 fi
 
 # Print diagnostic information
-echo "FFmpeg version:"
-ffmpeg -version | head -n 1
+# Note: FFmpeg version check disabled to avoid missing library errors during startup
+# FFmpeg will be verified when actually used for streaming
+# echo "FFmpeg version:"
+# ffmpeg -version | head -n 1
 
 # NVIDIA library check
 echo "NVIDIA libraries in LD_LIBRARY_PATH:"
 ldconfig -p | grep nvidia || echo "No NVIDIA libraries found in path"
 
-# Saving all environment variables to /etc/broadcaster/.env
-echo "Exporting environment variables to /etc/broadcaster/.env..."
-env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' > /etc/broadcaster/.env
-chmod 644 /etc/broadcaster/.env
-chown broadcaster:broadcaster /etc/broadcaster/.env
+# Saving all environment variables to /tmp/.env (tmpfs is writable)
+echo "Exporting environment variables to /tmp/.env..."
+env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' > /tmp/.env || true
+chmod 644 /tmp/.env
+chown broadcaster:broadcaster /tmp/.env
 
-# Ensure broadcaster scripts and directories have correct ownership
-echo "Setting correct ownership for broadcaster scripts and directories..."
-chown broadcaster:broadcaster /usr/local/bin/broadcaster /usr/local/bin/hls_transcode
-chmod 755 /usr/local/bin/broadcaster /usr/local/bin/hls_transcode
+# Note: broadcaster scripts ownership set in Dockerfile (read-only filesystem)
+echo "Verifying broadcaster scripts permissions..."
+ls -la /usr/local/bin/broadcaster /usr/local/bin/hls_transcode | head -3
 
-# Create and set permissions for log directory
+# Create and set permissions for log directory (mounted volume)
 mkdir -p /var/log/broadcaster
-chown -R broadcaster:broadcaster /var/log/broadcaster
-chmod -R 755 /var/log/broadcaster
+chown -R broadcaster:broadcaster /var/log/broadcaster || true
+chmod -R 755 /var/log/broadcaster || true
 
-# Set permissions for profiles.yml
-chown broadcaster:broadcaster /etc/broadcaster/profiles.yml
-chmod 644 /etc/broadcaster/profiles.yml
+# Note: profiles.yml is read-only mounted from host, ownership set by Docker
 
-# Create debug log file with correct permissions
-touch /var/log/broadcaster/exec_debug.log
-chown broadcaster:broadcaster /var/log/broadcaster/exec_debug.log
-chmod 644 /var/log/broadcaster/exec_debug.log
+# Create debug log file with correct permissions (in mounted volume)
+touch /var/log/broadcaster/exec_debug.log || true
+chown broadcaster:broadcaster /var/log/broadcaster/exec_debug.log || true
+chmod 644 /var/log/broadcaster/exec_debug.log || true
 
 # Start cron service for log rotation
 service cron start

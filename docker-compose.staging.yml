@@ -30,7 +30,7 @@ services:
       - "1936:1935" # RTMP (staging)
       - "8081:8080" # HTTP status page (staging)
     container_name: nginx-rtmp-staging
-    user: "1001:1001"  # Run as non-root broadcaster user (UID/GID 1001)
+    # Note: Container starts as root for entrypoint setup (GPU, chown), NGINX runs as broadcaster user
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: all
@@ -44,6 +44,13 @@ services:
       - /tmp
       - /var/run
       - /var/cache/nginx
+      - /var/log/nginx
+      - /usr/local/nginx/logs
+      - /usr/local/nginx/client_body_temp
+      - /usr/local/nginx/proxy_temp
+      - /usr/local/nginx/fastcgi_temp
+      - /usr/local/nginx/uwsgi_temp
+      - /usr/local/nginx/scgi_temp
     secrets:
       - gaming_youtube_key
       - gaming_twitch_key

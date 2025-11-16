@@ -148,6 +148,13 @@ RUN apt-get update && apt-get install -y \
     logrotate \
     cron \
     procps \
+    libxcb1 \
+    libxcb-shm0 \
+    libxcb-xfixes0 \
+    libxcb-shape0 \
+    libasound2t64 \
+    libsdl2-2.0-0 \
+    libsndio7.0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binaries from builder stages

@@ -1,12 +1,12 @@
 #!/bin/bash
 set -e
 
-# Retrieves variables if /etc/broadcaster/.env exists
-if [ -f "/etc/broadcaster/.env" ]; then
-    export $(grep -v '^#' /etc/broadcaster/.env | xargs)
-    echo "Environment variables loaded from /etc/broadcaster/.env"
+# Retrieves variables if /tmp/.env exists (tmpfs location)
+if [ -f "/tmp/.env" ]; then
+    export $(grep -v '^#' /tmp/.env | xargs)
+    echo "Environment variables loaded from /tmp/.env"
 else
-    echo "Warning: /etc/broadcaster/.env not found!"
+    echo "Warning: /tmp/.env not found!"
 fi
 
 # Configuration paths
