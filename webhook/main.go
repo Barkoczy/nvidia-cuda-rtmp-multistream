@@ -51,11 +51,16 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req PublishRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Error decoding request: %v", err)
+	// Parse form data (NGINX RTMP sends application/x-www-form-urlencoded)
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Error parsing form: %v", err)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
+	}
+
+	req := PublishRequest{
+		Name: r.FormValue("name"),
+		App:  r.FormValue("app"),
 	}
 
 	// Sanitize profile name to prevent command injection
@@ -80,28 +85,12 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 	activeStreams[profile] = &StreamInfo{Profile: profile, Active: true}
 	streamsMux.Unlock()
 
-	// Start broadcaster script
-	go func() {
-		if err := startBroadcaster(profile); err != nil {
-			log.Printf("Error starting broadcaster for profile %s: %v", profile, err)
-			streamsMux.Lock()
-			if stream, exists := activeStreams[profile]; exists {
-				stream.Active = false
-			}
-			streamsMux.Unlock()
-		}
-	}()
-
-	// Start HLS transcode script
-	go func() {
-		if err := startHLSTranscode(profile, "start"); err != nil {
-			log.Printf("Error starting HLS transcode for profile %s: %v", profile, err)
-		}
-	}()
+	// Auth-only webhook: NGINX will execute broadcaster/hls_transcode via exec_publish
+	log.Printf("Stream authorized for profile: %s (orchestration via NGINX exec_publish)", profile)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "started",
+		"status":  "authorized",
 		"profile": profile,
 	})
 }
@@ -113,11 +102,16 @@ func handlePublishDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req PublishRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Error decoding request: %v", err)
+	// Parse form data (NGINX RTMP sends application/x-www-form-urlencoded)
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Error parsing form: %v", err)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
+	}
+
+	req := PublishRequest{
+		Name: r.FormValue("name"),
+		App:  r.FormValue("app"),
 	}
 
 	profile := sanitizeProfileName(req.Name)
@@ -135,19 +129,8 @@ func handlePublishDone(w http.ResponseWriter, r *http.Request) {
 	}
 	streamsMux.Unlock()
 
-	// Stop broadcaster
-	go func() {
-		if err := stopBroadcaster(profile); err != nil {
-			log.Printf("Error stopping broadcaster for profile %s: %v", profile, err)
-		}
-	}()
-
-	// Stop HLS transcode
-	go func() {
-		if err := startHLSTranscode(profile, "stop"); err != nil {
-			log.Printf("Error stopping HLS transcode for profile %s: %v", profile, err)
-		}
-	}()
+	// Auth-only webhook: NGINX will execute broadcaster/hls_transcode stop via exec_publish_done
+	log.Printf("Stream ended for profile: %s (cleanup via NGINX exec_publish_done)", profile)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
