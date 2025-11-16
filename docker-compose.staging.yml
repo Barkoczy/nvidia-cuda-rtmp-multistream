@@ -1,4 +1,24 @@
 services:
+  # Webhook server for secure RTMP event handling
+  webhook:
+    build:
+      context: ./webhook
+      dockerfile: Dockerfile
+    container_name: webhook-staging
+    restart: unless-stopped
+    ports:
+      - "8090:8090"  # Webhook API endpoint
+    environment:
+      - WEBHOOK_PORT=8090
+    networks:
+      - streaming
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
   nginx-rtmp-staging:
     build:
       context: .
@@ -15,7 +35,9 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: all
     volumes:
       - ./logs-staging:/var/log/broadcaster
-      - ./profiles.yml:/etc/broadcaster/profiles.yml
+      - ./profiles.yml:/etc/broadcaster/profiles.yml:ro
+      - ./nginx.staging.conf:/usr/local/nginx/conf/nginx.conf:ro
+      - /tmp/hls:/tmp/hls
     deploy:
       resources:
         reservations:
@@ -24,3 +46,12 @@ services:
               count: 1
               capabilities: [gpu]
     restart: unless-stopped
+    networks:
+      - streaming
+    depends_on:
+      webhook:
+        condition: service_healthy
+
+networks:
+  streaming:
+    driver: bridge
