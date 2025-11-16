@@ -1,0 +1,95 @@
+{
+  "dashboard": {
+    "title": "NVIDIA GPU Metrics",
+    "tags": ["gpu", "nvidia", "rtmp"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "GPU Utilization",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "DCGM_FI_DEV_GPU_UTIL",
+            "legendFormat": "GPU {{gpu}} - {{UUID}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "label": "Utilization %", "format": "percent", "max": 100 }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "GPU Memory Usage",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "DCGM_FI_DEV_FB_USED / 1024 / 1024",
+            "legendFormat": "Used (MB)",
+            "refId": "A"
+          },
+          {
+            "expr": "DCGM_FI_DEV_FB_FREE / 1024 / 1024",
+            "legendFormat": "Free (MB)",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          { "label": "Memory (MB)", "format": "short" }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "GPU Temperature",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "DCGM_FI_DEV_GPU_TEMP",
+            "legendFormat": "GPU {{gpu}} Temp",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "label": "Temperature (°C)", "format": "celsius" }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": { "type": "gt", "params": [80] },
+              "query": { "params": ["A", "5m", "now"] }
+            }
+          ],
+          "name": "GPU Temperature High"
+        }
+      },
+      {
+        "id": 4,
+        "title": "NVENC/NVDEC Utilization",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "DCGM_FI_DEV_ENC_UTIL",
+            "legendFormat": "Encoder",
+            "refId": "A"
+          },
+          {
+            "expr": "DCGM_FI_DEV_DEC_UTIL",
+            "legendFormat": "Decoder",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          { "label": "Utilization %", "format": "percent", "max": 100 }
+        ]
+      }
+    ]
+  }
+}

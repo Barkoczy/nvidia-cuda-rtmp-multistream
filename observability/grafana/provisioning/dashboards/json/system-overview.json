@@ -1,0 +1,102 @@
+{
+  "dashboard": {
+    "title": "System Overview",
+    "tags": ["system", "host", "docker"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "CPU Usage",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU Usage %",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "label": "Usage %", "format": "percent", "max": 100 }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Memory Usage",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes",
+            "legendFormat": "Used",
+            "refId": "A"
+          },
+          {
+            "expr": "node_memory_MemAvailable_bytes",
+            "legendFormat": "Available",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          { "label": "Memory", "format": "bytes" }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Container Count",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 8, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "count(container_last_seen)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 4,
+        "title": "FFmpeg Processes",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 8, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "count(container_processes{name=~\".*ffmpeg.*\"})",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 5,
+        "title": "Network Traffic",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "expr": "rate(node_network_receive_bytes_total[5m])",
+            "legendFormat": "RX {{device}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(node_network_transmit_bytes_total[5m])",
+            "legendFormat": "TX {{device}}",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          { "label": "Bytes/sec", "format": "Bps" }
+        ]
+      }
+    ]
+  }
+}

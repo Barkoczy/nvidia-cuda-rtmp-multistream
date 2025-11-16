@@ -86,6 +86,138 @@ secrets:
   gaming_x_key:
     file: ./secrets/gaming_x_key.txt
 
+  # Observability Stack
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus-staging
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    networks:
+      - streaming
+    depends_on:
+      - webhook
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana-staging
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - streaming
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki-staging
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    networks:
+      - streaming
+
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: promtail-staging
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logs-staging:/var/log/broadcaster:ro
+    networks:
+      - streaming
+    depends_on:
+      - loki
+
+  # Node exporter for host metrics
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: node-exporter-staging
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    networks:
+      - streaming
+    ports:
+      - "9100:9100"
+
+  # cAdvisor for container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor-staging
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8082:8080"
+    networks:
+      - streaming
+
+  # NVIDIA DCGM exporter for GPU metrics
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.5-3.4.0-ubuntu22.04
+    container_name: dcgm-exporter-staging
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    ports:
+      - "9400:9400"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, utility]
+    networks:
+      - streaming
+
 networks:
   streaming:
     driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
