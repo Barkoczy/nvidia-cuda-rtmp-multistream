@@ -106,6 +106,7 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'  # Add size limit
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--web.enable-lifecycle'
@@ -115,6 +116,18 @@ services:
       - prometheus-data:/prometheus
     networks:
       - streaming
+    # Security: User (official image already uses nobody:65534)
+    user: "65534:65534"
+    # Security: Read-only root filesystem (TSDB needs write to /prometheus)
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - webhook
 
@@ -129,12 +142,28 @@ services:
     environment:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_LOG_MODE=console
+      - GF_LOG_LEVEL=info
     volumes:
       - grafana-data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards/json:ro
     networks:
       - streaming
+    # Security: User (official image uses grafana:472)
+    user: "472:0"
+    # Security: Read-only root filesystem (NOT possible - Grafana needs RW for DB)
+    # Skipping read_only for Grafana
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN         # For data directory ownership
+      - DAC_OVERRIDE  # For writing to volumes
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - prometheus
       - loki
@@ -151,6 +180,16 @@ services:
       - loki-data:/loki
     networks:
       - streaming
+    # Security: User (official image uses loki:10001)
+    user: "10001:10001"
+    # Security: Read-only root filesystem (NOT possible - needs RW for TSDB)
+    # Skipping read_only for Loki
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
 
   promtail:
     image: grafana/promtail:2.9.3
@@ -163,6 +202,20 @@ services:
       - ./logs-staging:/var/log/broadcaster:ro
     networks:
       - streaming
+    # Security: User (needs root for Docker socket access)
+    # Cannot change user for Promtail - requires Docker socket access
+    # Security: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Security: Drop capabilities (limited - needs Docker access)
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH  # For reading log files
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - loki
 
@@ -184,12 +237,27 @@ services:
       - streaming
     ports:
       - "9100:9100"
+    # Security: User (official image uses nobody:65534)
+    user: "65534:65534"
+    # Security: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
 
   # cAdvisor for container metrics
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
     container_name: cadvisor-staging
     restart: unless-stopped
+    # Security: EXCEPTION - cAdvisor requires privileged mode by design
+    # Required for container metrics collection from /sys, /dev, cgroups
+    # CIS 5.4 exception documented - trade-off for observability
     privileged: true
     volumes:
       - /:/rootfs:ro
@@ -222,6 +290,18 @@ services:
               capabilities: [gpu, utility]
     networks:
       - streaming
+    # Security: User (NVIDIA images may require root for GPU access)
+    # Checking official image default, may need root for NVML library
+    # Security: Read-only root filesystem (GPU metrics only, no writes needed)
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Security: Drop capabilities where possible (GPU access may require some)
+    cap_drop:
+      - ALL
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
 
   # NGINX VTS exporter for RTMP metrics
   nginx-vts-exporter:
@@ -238,6 +318,18 @@ services:
       - streaming
     depends_on:
       - nginx-rtmp-staging
+    # Security: User (exporter images typically use nobody/non-root)
+    user: "65534:65534"
+    # Security: Read-only root filesystem (metrics scraper, no writes)
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
 
 secrets:
   gaming_youtube_key:

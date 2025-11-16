@@ -59,23 +59,46 @@ scrape_configs:
           __path__: /var/log/broadcaster/*.log
 
     pipeline_stages:
-      # Extract profile from filename
-      - regex:
-          expression: '.*\/(?P<profile>[^_]+)_.*\.log'
+      # Match only logfmt lines (starting with ts=)
+      - match:
+          selector: '{job="broadcaster"}'
+          stages:
+            # Only process lines starting with ts= (logfmt format)
+            - regex:
+                expression: '^ts='
 
-      - labels:
-          profile:
+            # Parse logfmt format (key=value pairs)
+            - logfmt:
+                mapping:
+                  ts:
+                  level:
+                  component:
+                  event:
+                  profile:
+                  target:
+                  stream_id:
+                  codec:
+                  preset:
+                  bitrate:
+                  framerate:
+                  gopsize:
+                  exit_code:
+                  duration_ms:
+                  pid:
+                  msg:
 
-      # Parse log lines
-      - regex:
-          expression: '^\[(?P<timestamp>.*?)\] (?P<level>\w+): (?P<message>.*)'
+            # Extract labels for filtering and grouping
+            - labels:
+                level:
+                component:
+                event:
+                profile:
+                target:
 
-      - labels:
-          level:
-
-      - timestamp:
-          source: timestamp
-          format: '2006-01-02 15:04:05'
+            # Parse ISO8601 timestamp
+            - timestamp:
+                source: ts
+                format: RFC3339
 
   # NGINX access logs
   - job_name: nginx

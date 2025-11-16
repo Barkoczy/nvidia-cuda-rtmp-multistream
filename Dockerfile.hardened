@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y \
     libxcb1-dev \
     libxcb-shm0-dev \
     libxcb-xfixes0-dev \
+    libxv1 \
     texinfo \
     zlib1g-dev \
     cuda-nvcc-12-8 \
@@ -142,6 +143,7 @@ RUN apt-get update && apt-get install -y \
     libtheora0 \
     libvorbis0a \
     libva2 \
+    libva-drm2 \
     libvdpau1 \
     libssl3 \
     ca-certificates \
@@ -152,6 +154,7 @@ RUN apt-get update && apt-get install -y \
     libxcb-shm0 \
     libxcb-xfixes0 \
     libxcb-shape0 \
+    libxv1 \
     libasound2t64 \
     libsdl2-2.0-0 \
     libsndio7.0 \
