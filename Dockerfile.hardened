@@ -1,0 +1,219 @@
+# Security-hardened Dockerfile with read-only root filesystem
+# Based on original Dockerfile with additional security measures
+
+FROM nvidia/cuda:12.8.0-devel-ubuntu24.04 AS nvidia-base
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    wget \
+    git \
+    pkg-config \
+    yasm \
+    nasm \
+    cmake \
+    libtool \
+    libc6 \
+    libc6-dev \
+    unzip \
+    libx264-dev \
+    libx265-dev \
+    libvpx-dev \
+    libfdk-aac-dev \
+    libmp3lame-dev \
+    libopus-dev \
+    autoconf \
+    automake \
+    libass-dev \
+    libfreetype6-dev \
+    libsdl2-dev \
+    libtheora-dev \
+    libtool \
+    libva-dev \
+    libvdpau-dev \
+    libvorbis-dev \
+    libxcb1-dev \
+    libxcb-shm0-dev \
+    libxcb-xfixes0-dev \
+    texinfo \
+    zlib1g-dev \
+    cuda-nvcc-12-8 \
+    cuda-cudart-dev-12-8 \
+    libssl-dev \
+    openssl \
+    gettext-base \
+    logrotate \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+# Setting LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
+
+# Setup logrotate configuration
+COPY broadcaster-logrotate /etc/logrotate.d/broadcaster
+
+# Enable cron service for logrotate
+RUN chmod 644 /etc/logrotate.d/broadcaster && \
+    echo "0 0 * * * /usr/sbin/logrotate /etc/logrotate.d/broadcaster --force" >> /etc/crontab
+
+# Install NVIDIA SDK Components (nv-codec-headers)
+RUN wget https://github.com/FFmpeg/nv-codec-headers/releases/download/n13.0.19.0/nv-codec-headers-13.0.19.0.tar.gz \
+    && tar xf nv-codec-headers-13.0.19.0.tar.gz \
+    && cd nv-codec-headers-* \
+    && make install \
+    && cd .. \
+    && rm -rf nv-codec-headers-*
+
+# Build FFmpeg with CUDA support
+FROM nvidia-base AS ffmpeg-builder
+
+WORKDIR /build
+
+RUN git clone --depth 1 --branch n7.2 https://github.com/FFmpeg/FFmpeg.git
+
+WORKDIR /build/FFmpeg
+
+RUN ./configure \
+    --enable-cuda-nvcc \
+    --enable-libnpp \
+    --enable-nvenc \
+    --enable-nvdec \
+    --enable-cuvid \
+    --enable-gpl \
+    --enable-version3 \
+    --enable-nonfree \
+    --enable-libx264 \
+    --enable-libx265 \
+    --enable-libvpx \
+    --enable-libfdk-aac \
+    --enable-libmp3lame \
+    --enable-libopus \
+    --enable-libtheora \
+    --enable-libvorbis \
+    --enable-openssl \
+    --extra-cflags="-I/usr/local/cuda/include" \
+    --extra-ldflags="-L/usr/local/cuda/lib64" \
+    && make -j$(nproc) \
+    && make install
+
+# Build NGINX with RTMP module
+FROM nvidia-base AS nginx-builder
+
+WORKDIR /build
+
+RUN wget https://nginx.org/download/nginx-1.25.3.tar.gz \
+    && tar -xzvf nginx-1.25.3.tar.gz \
+    && git clone https://github.com/arut/nginx-rtmp-module.git
+
+WORKDIR /build/nginx-1.25.3
+
+RUN ./configure \
+    --prefix=/usr/local/nginx \
+    --with-http_ssl_module \
+    --with-http_v2_module \
+    --with-http_realip_module \
+    --with-http_stub_status_module \
+    --with-threads \
+    --add-module=../nginx-rtmp-module \
+    && make -j$(nproc) \
+    && make install
+
+# Install yq for YAML parsing
+FROM nvidia-base AS yq-installer
+
+WORKDIR /tmp
+
+RUN wget https://github.com/mikefarah/yq/releases/download/v4.35.1/yq_linux_amd64 -O /usr/bin/yq \
+    && chmod +x /usr/bin/yq
+
+# Final runtime stage with security hardening
+FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04
+
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libx264-164 \
+    libx265-199 \
+    libvpx9 \
+    libfdk-aac2 \
+    libmp3lame0 \
+    libopus0 \
+    libtheora0 \
+    libvorbis0a \
+    libva2 \
+    libvdpau1 \
+    libssl3 \
+    ca-certificates \
+    logrotate \
+    cron \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binaries from builder stages
+COPY --from=ffmpeg-builder /usr/local/bin/ffmpeg /usr/bin/ffmpeg
+COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/bin/ffprobe
+COPY --from=nginx-builder /usr/local/nginx /usr/local/nginx
+COPY --from=yq-installer /usr/bin/yq /usr/bin/yq
+
+# Create broadcaster user with specific UID/GID (non-root)
+RUN groupadd -g 1000 broadcaster && \
+    useradd -u 1000 -g broadcaster -s /bin/bash -m broadcaster && \
+    usermod -a -G video broadcaster
+
+# Create writable directories with proper ownership
+# These will be mounted as tmpfs volumes for read-only root filesystem
+RUN mkdir -p /var/log/broadcaster \
+             /var/log/nginx \
+             /etc/broadcaster \
+             /tmp/hls \
+             /tmp/hls_pid \
+             /var/run \
+             /var/cache/nginx && \
+    chown -R broadcaster:broadcaster /var/log/broadcaster \
+                                      /var/log/nginx \
+                                      /etc/broadcaster \
+                                      /tmp/hls \
+                                      /tmp/hls_pid \
+                                      /var/cache/nginx && \
+    chmod 755 /var/log/broadcaster \
+              /var/log/nginx \
+              /etc/broadcaster \
+              /tmp/hls \
+              /tmp/hls_pid
+
+# Copy configuration files
+COPY --chown=broadcaster:broadcaster profiles.yml /etc/broadcaster/profiles.yml
+COPY --chown=broadcaster:broadcaster nginx.conf /usr/local/nginx/conf/nginx.conf
+COPY --chown=broadcaster:broadcaster broadcaster /usr/local/bin/broadcaster
+COPY --chown=broadcaster:broadcaster hls_transcode /usr/local/bin/hls_transcode
+COPY --chown=root:root entrypoint.sh /entrypoint.sh
+
+# Copy logrotate configuration
+COPY broadcaster-logrotate /etc/logrotate.d/broadcaster
+RUN chmod 644 /etc/logrotate.d/broadcaster
+
+# Set proper permissions for executables
+RUN chmod 755 /usr/local/bin/broadcaster \
+              /usr/local/bin/hls_transcode \
+              /entrypoint.sh && \
+    chmod 644 /etc/broadcaster/profiles.yml
+
+# Create stat.xsl for NGINX RTMP stats
+RUN mkdir -p /var/www/html && \
+    wget -O /var/www/html/stat.xsl https://raw.githubusercontent.com/arut/nginx-rtmp-module/master/stat.xsl
+
+# Setting LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
+
+# Expose ports
+EXPOSE 1935 8080
+
+# Set working directory
+WORKDIR /app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/stat || exit 1
+
+# Security: Run as non-root user (entrypoint will handle initial setup as root)
+# Note: Entrypoint runs as root to setup GPU symlinks, then drops to broadcaster user
+ENTRYPOINT ["/entrypoint.sh"]
