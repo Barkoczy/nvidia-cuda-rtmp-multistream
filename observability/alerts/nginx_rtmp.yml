@@ -1,0 +1,47 @@
+groups:
+  - name: nginx_rtmp_alerts
+    interval: 30s
+    rules:
+      # High bandwidth usage (>50 Mbps outgoing)
+      - alert: HighRTMPBandwidth
+        expr: sum(rate(nginx_vts_server_bytes_total{direction="out"}[1m])) > 6250000
+        for: 5m
+        labels:
+          severity: warning
+          component: nginx-rtmp
+        annotations:
+          summary: "High RTMP bandwidth usage"
+          description: "RTMP outgoing bandwidth is {{ $value | humanize }}B/s (threshold: 50 Mbps)"
+
+      # Critical bandwidth usage (>100 Mbps outgoing)
+      - alert: CriticalRTMPBandwidth
+        expr: sum(rate(nginx_vts_server_bytes_total{direction="out"}[1m])) > 12500000
+        for: 2m
+        labels:
+          severity: critical
+          component: nginx-rtmp
+        annotations:
+          summary: "Critical RTMP bandwidth usage"
+          description: "RTMP outgoing bandwidth is {{ $value | humanize }}B/s (threshold: 100 Mbps)"
+
+      # No active RTMP connections when expected
+      - alert: NoRTMPConnections
+        expr: nginx_vts_server_connections{host="*"} == 0
+        for: 5m
+        labels:
+          severity: info
+          component: nginx-rtmp
+        annotations:
+          summary: "No active RTMP connections"
+          description: "NGINX RTMP has no active connections for 5 minutes"
+
+      # High request error rate
+      - alert: HighRTMPErrorRate
+        expr: sum(rate(nginx_vts_server_requests_total{code=~"4..|5.."}[5m])) / sum(rate(nginx_vts_server_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: nginx-rtmp
+        annotations:
+          summary: "High RTMP request error rate"
+          description: "RTMP error rate is {{ $value | humanizePercentage }} (threshold: 5%)"

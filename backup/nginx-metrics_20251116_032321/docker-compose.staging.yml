@@ -20,7 +20,6 @@ services:
       retries: 3
 
   nginx-rtmp-staging:
-    image: nvidia-cuda-rtmp-multistream-nginx-rtmp-staging:latest
     build:
       context: .
       dockerfile: Dockerfile.hardened
@@ -30,7 +29,7 @@ services:
       - "1936:1935" # RTMP (staging)
       - "8081:8080" # HTTP status page (staging)
     container_name: nginx-rtmp-staging
-    user: "1001:1001"  # Run as non-root broadcaster user (UID/GID 1001)
+    user: "1000:1000"  # Run as non-root broadcaster user
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: all
@@ -77,6 +76,16 @@ services:
       webhook:
         condition: service_healthy
 
+secrets:
+  gaming_youtube_key:
+    file: ./secrets/gaming_youtube_key.txt
+  gaming_twitch_key:
+    file: ./secrets/gaming_twitch_key.txt
+  gaming_kick_key:
+    file: ./secrets/gaming_kick_key.txt
+  gaming_x_key:
+    file: ./secrets/gaming_x_key.txt
+
   # Observability Stack
   prometheus:
     image: prom/prometheus:v2.48.0
@@ -114,7 +123,6 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards/json:ro
     networks:
       - streaming
     depends_on:
@@ -204,30 +212,6 @@ services:
               capabilities: [gpu, utility]
     networks:
       - streaming
-
-  # NGINX VTS exporter for RTMP metrics
-  nginx-vts-exporter:
-    image: sophos/nginx-vts-exporter:latest
-    container_name: nginx-vts-exporter-staging
-    restart: unless-stopped
-    command:
-      - '-nginx.scrape_uri=http://nginx-rtmp-staging:8080/status/format/json'
-    ports:
-      - "9913:9913"
-    networks:
-      - streaming
-    depends_on:
-      - nginx-rtmp-staging
-
-secrets:
-  gaming_youtube_key:
-    file: ./secrets/gaming_youtube_key.txt
-  gaming_twitch_key:
-    file: ./secrets/gaming_twitch_key.txt
-  gaming_kick_key:
-    file: ./secrets/gaming_kick_key.txt
-  gaming_x_key:
-    file: ./secrets/gaming_x_key.txt
 
 networks:
   streaming:

@@ -145,6 +145,46 @@ check_loki() {
     fi
 }
 
+# Check RTMP metrics
+check_rtmp_metrics() {
+    echo -e "\n--- RTMP Streaming Metrics ---"
+
+    # Check active streams
+    if streams=$(curl -s "$PROMETHEUS_URL/api/v1/query?query=nginx_vts_server_connections{host=\"*\"}" 2>&1); then
+        stream_count=$(echo "$streams" | jq -r '.data.result[0].value[1]' 2>/dev/null || echo "0")
+        echo -e "  Active Connections: ${stream_count}"
+
+        if [ "$stream_count" = "0" ]; then
+            echo -e "  ${YELLOW}ℹ${NC} No active RTMP connections"
+        else
+            echo -e "  ${GREEN}✓${NC} RTMP server is handling connections"
+        fi
+    else
+        echo -e "${RED}✗${NC} Failed to query RTMP connection metrics"
+        return 1
+    fi
+
+    # Check bandwidth
+    if bandwidth=$(curl -s "$PROMETHEUS_URL/api/v1/query?query=sum(rate(nginx_vts_server_bytes_total{direction=\"out\"}[1m]))" 2>&1); then
+        bw_value=$(echo "$bandwidth" | jq -r '.data.result[0].value[1]' 2>/dev/null || echo "0")
+        bw_mbps=$(echo "$bw_value" | awk '{printf "%.2f", $1 * 8 / 1000000}')
+        echo -e "  Outgoing Bandwidth: ${bw_mbps} Mbps"
+
+        # Warning threshold: 50 Mbps (6250000 bytes/s)
+        if [ "${bw_value%.*}" -gt 6250000 ]; then
+            echo -e "  ${YELLOW}⚠${NC} Bandwidth is high (>50 Mbps)"
+        fi
+
+        # Critical threshold: 100 Mbps (12500000 bytes/s)
+        if [ "${bw_value%.*}" -gt 12500000 ]; then
+            echo -e "  ${RED}⚠${NC} Bandwidth is critical (>100 Mbps)"
+        fi
+    else
+        echo -e "${RED}✗${NC} Failed to query RTMP bandwidth metrics"
+        return 1
+    fi
+}
+
 # Main execution
 main() {
     local exit_code=0
@@ -158,6 +198,7 @@ main() {
     check_prometheus_targets || exit_code=1
     check_prometheus_alerts || exit_code=1
     check_gpu_metrics || exit_code=1
+    check_rtmp_metrics || exit_code=1
     check_grafana_datasources || exit_code=1
     check_loki || exit_code=1
 
@@ -172,7 +213,8 @@ main() {
     echo "Next steps:"
     echo "  1. Open Grafana dashboard 'NVIDIA GPU Metrics' at $GRAFANA_URL"
     echo "  2. Open Grafana dashboard 'System Overview' at $GRAFANA_URL"
-    echo "  3. Check Prometheus alerts at $PROMETHEUS_URL/alerts"
+    echo "  3. Open Grafana dashboard 'Stream Health - RTMP Metrics' at $GRAFANA_URL"
+    echo "  4. Check Prometheus alerts at $PROMETHEUS_URL/alerts"
 
     return $exit_code
 }
