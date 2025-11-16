@@ -194,6 +194,29 @@ curl http://localhost:3100/loki/api/v1/query
 # Query logs for specific profile
 curl -G http://localhost:3100/loki/api/v1/query \
   --data-urlencode 'query={job="broadcaster", profile="gaming"}'
+
+# === Operational Scripts (Phase 2) ===
+
+# Daily health check
+./scripts/observability/health_check_daily.sh
+
+# Weekly detailed analysis
+./scripts/observability/health_check_weekly.sh
+
+# Query library (PromQL/LogQL)
+./scripts/observability/query_library.sh gpu_util
+./scripts/observability/query_library.sh broadcaster_errors
+
+# Alert response automation
+./scripts/observability/alert_response.sh gpu_high
+./scripts/observability/alert_response.sh webhook_unhealthy
+
+# Backup observability stack
+./scripts/observability/backup.sh all
+
+# Upgrade observability stack
+./scripts/observability/upgrade.sh check
+./scripts/observability/upgrade.sh upgrade
 ```
 
 ### Debugging
@@ -377,6 +400,13 @@ docker compose -f docker-compose.staging.yml up -d
 - **observability/promtail-config.yml**: Promtail configuration
 - **observability/alerts/**: Alert rules for GPU and streams
 - **observability/grafana/**: Dashboard provisioning and datasources
+- **scripts/observability/**: Operational scripts for monitoring and maintenance
+  - **health_check_daily.sh**: Daily health checks automation
+  - **health_check_weekly.sh**: Weekly detailed analysis
+  - **alert_response.sh**: Alert response automation
+  - **query_library.sh**: PromQL/LogQL query library
+  - **backup.sh**: Backup and recovery automation
+  - **upgrade.sh**: Stack upgrade helper
 
 **Documentation**:
 - **README.md**: User-facing documentation
