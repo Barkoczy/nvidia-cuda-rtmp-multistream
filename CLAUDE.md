@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Docker-based NGINX RTMP server that restreams to multiple platforms simultaneously (YouTube, Twitch, Kick, X/Twitter) using NVIDIA GPU hardware acceleration (NVENC). The system uses a profile-based configuration where each profile can broadcast to multiple services with different encoding settings.
 
-**Current Branch**: `feature/phase2-nginx-metrics`
-**Status**: ✅ Phase 1 security hardening COMPLETE (10/10 tests passed), Phase 2 observability stack implemented
+**Current Branch**: `feature/phase3-ffmpeg-metrics`
+**Status**: ✅ Phase 1 security COMPLETE, ✅ Phase 2 observability COMPLETE, 🚧 Phase 3 FFmpeg telemetry IN PROGRESS
 
 ## Architecture
 
@@ -50,14 +50,21 @@ This is a Docker-based NGINX RTMP server that restreams to multiple platforms si
    - Outputs to `/tmp/hls/` directory
    - Accessible via HTTP at `http://localhost:8080/hls/PROFILE_NAME.m3u8`
 
-5. **Observability Stack** - **NEW in Phase 2**
+5. **Observability Stack** (Phase 2)
    - **Prometheus**: Metrics collection (port 9090)
    - **Grafana**: Dashboards and visualization (port 3000)
    - **Loki**: Log aggregation (port 3100)
-   - **Promtail**: Log collection agent
+   - **Promtail**: Log collection agent with logfmt parsing
    - **DCGM Exporter**: NVIDIA GPU metrics (port 9400)
    - **Node Exporter**: Host metrics (port 9100)
    - **cAdvisor**: Container metrics (port 8082)
+
+6. **FFmpeg Telemetry** (Phase 3) - **IN PROGRESS**
+   - Structured logging (logfmt format) in `broadcaster` and `hls_transcode`
+   - Fields: `ts`, `level`, `component`, `event`, `profile`, `target`, `stream_id`, `exit_code`, `duration_ms`
+   - Loki parsing via Promtail pipeline stages
+   - Grafana dashboard: `ffmpeg_telemetry.json`
+   - Alert rules: `observability/grafana/provisioning/alerting/ffmpeg_alerts.yml`
 
 ### Key File Flow
 
@@ -194,6 +201,20 @@ curl http://localhost:3100/loki/api/v1/query
 # Query logs for specific profile
 curl -G http://localhost:3100/loki/api/v1/query \
   --data-urlencode 'query={job="broadcaster", profile="gaming"}'
+
+# === FFmpeg Telemetry (Phase 3) ===
+
+# FFmpeg stream starts in last 10 minutes
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query={job="broadcaster", event="ffmpeg_start"}'
+
+# FFmpeg exit codes (errors)
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query={job="broadcaster", event="ffmpeg_exit"} | logfmt | exit_code != "0"'
+
+# Stream duration analysis
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query=avg_over_time({job="broadcaster", event="ffmpeg_exit"} | logfmt | unwrap duration_ms [1h])'
 
 # === Operational Scripts (Phase 2) ===
 
@@ -345,6 +366,26 @@ When adding new platforms or modifying encoding parameters in profiles.yml:
 - Old logs auto-deleted by broadcaster script (broadcaster:17)
 - **Loki**: 7-day retention for aggregated logs
 
+### FFmpeg Telemetry Logging (Phase 3)
+
+Scripts use **logfmt** format (key=value pairs) for structured logging:
+
+```text
+ts=2025-11-16T17:00:00Z level=info component=broadcaster event=ffmpeg_start profile=gaming target=youtube stream_id=gaming_youtube_20251116_170000 codec=hevc_nvenc preset=p4 bitrate=12000k
+ts=2025-11-16T17:02:34Z level=info component=broadcaster event=ffmpeg_exit profile=gaming target=youtube stream_id=gaming_youtube_20251116_170000 exit_code=0 duration_ms=154321 msg="FFmpeg finished successfully"
+```
+
+**Key Events**:
+- `ffmpeg_start`: Stream process started (includes codec, preset, bitrate, framerate)
+- `ffmpeg_exit`: Stream process ended (includes exit_code, duration_ms)
+- `stream_started`: Background process spawned (includes pid)
+- `service_config`: Service configuration loaded
+
+**Logging Helper** (broadcaster:5-55, hls_transcode:4-55):
+- `log_info EVENT MESSAGE [key value]...`
+- `log_error EVENT MESSAGE [key value]...`
+- Context from environment: `PROFILE`, `TARGET`, `STREAM_ID`
+
 ### Security Best Practices
 
 1. **Always use Docker secrets** for new deployments
@@ -397,7 +438,7 @@ docker compose -f docker-compose.staging.yml up -d
 **Observability (Phase 2)**:
 - **observability/prometheus.yml**: Prometheus configuration
 - **observability/loki-config.yml**: Loki configuration
-- **observability/promtail-config.yml**: Promtail configuration
+- **observability/promtail-config.yml**: Promtail configuration with logfmt parsing for FFmpeg telemetry
 - **observability/alerts/**: Alert rules for GPU and streams
 - **observability/grafana/**: Dashboard provisioning and datasources
 - **scripts/observability/**: Operational scripts for monitoring and maintenance
@@ -407,6 +448,12 @@ docker compose -f docker-compose.staging.yml up -d
   - **query_library.sh**: PromQL/LogQL query library
   - **backup.sh**: Backup and recovery automation
   - **upgrade.sh**: Stack upgrade helper
+
+**FFmpeg Telemetry (Phase 3)**:
+- **observability/grafana/dashboards/ffmpeg_telemetry.json**: FFmpeg stream telemetry dashboard
+- **observability/grafana/provisioning/alerting/ffmpeg_alerts.yml**: FFmpeg alert rules (exit codes, error bursts, restart loops)
+- **broadcaster**: Contains logfmt logging helper (lines 5-55) and run_ffmpeg wrapper
+- **hls_transcode**: Contains logfmt logging helper and run_ffmpeg_hls wrapper
 
 **Documentation**:
 - **README.md**: User-facing documentation
@@ -469,6 +516,23 @@ docker compose exec dcgm-exporter-staging nvidia-smi
 curl http://localhost:9400/metrics | grep DCGM
 ```
 
+### FFmpeg Telemetry Not Appearing in Loki
+
+```bash
+# Check logfmt format in broadcaster logs
+docker compose exec nginx-rtmp tail -20 /var/log/broadcaster/gaming.log | grep "^ts="
+
+# Verify Promtail is scraping logs
+docker compose logs promtail | grep broadcaster
+
+# Test Loki query directly
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query={job="broadcaster"} | logfmt'
+
+# Check labels are being extracted
+curl -G http://localhost:3100/loki/api/v1/labels
+```
+
 ## Performance Baselines
 
 See `.changelogs/20251116/baseline_measurements.md` for performance metrics before and after Phase 1/2 implementations.
@@ -481,11 +545,12 @@ See `.changelogs/20251116/baseline_measurements.md` for performance metrics befo
 ## Git Workflow
 
 ```bash
-# Current work branch
-git checkout feature/phase1-security
+# Current work branch (Phase 3 FFmpeg telemetry)
+git checkout feature/phase3-ffmpeg-metrics
 
-# View Phase 1 commits
-git log --oneline feature/phase1-security
+# Previous phase branches
+git checkout feature/phase2-nginx-metrics
+git checkout feature/phase1-security
 
 # Main branch for PRs
 git checkout main
