@@ -35,7 +35,7 @@ mkdir -p "$BACKUP_DIR"
 cp docker-compose.yml "$BACKUP_DIR/"
 cp nginx.conf "$BACKUP_DIR/"
 cp Dockerfile "$BACKUP_DIR/"
-cp .env "$BACKUP_DIR/.env.backup"
+test -f .env && cp .env "$BACKUP_DIR/.env.backup"
 
 # Backup application files
 cp broadcaster "$BACKUP_DIR/"
@@ -184,25 +184,16 @@ docker compose exec nginx-rtmp ls -la /run/secrets/
 # 4. Webhook responding
 curl http://localhost:8090/health
 # Expected: {"status":"healthy"}
+
+# 5. NVENC smoke test
+docker compose exec nginx-rtmp ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=size=128x128:rate=1 -t 1 -c:v h264_nvenc -f null -
 ```
 
-### 10. Clean Up Environment Variables
+### 10. Clean Up Migration Artifacts (optional)
 
 ```bash
-# After confirming secrets work, remove from .env
-
-# Backup .env first
-cp .env .env.with-keys
-
-# Remove stream keys (they're now in secrets/)
-sed -i '/GAMING_YOUTUBE_KEY/d' .env
-sed -i '/GAMING_TWITCH_KEY/d' .env
-sed -i '/GAMING_KICK_KEY/d' .env
-sed -i '/GAMING_X_KEY/d' .env
-
-# Verify .env no longer contains keys
-grep -i "_KEY" .env
-# Should return nothing or only non-secret keys
+# If you used .env only for one-time migration, archive or remove it
+test -f .env && mv .env .env.migrated.$(date +%Y%m%d)
 ```
 
 ### 11. Update Documentation
@@ -228,7 +219,6 @@ BACKUP_DIR="backup/20251116_022802_pre-phase1"  # Use your backup timestamp
 cp "$BACKUP_DIR/docker-compose.yml" .
 cp "$BACKUP_DIR/nginx.conf" .
 cp "$BACKUP_DIR/Dockerfile" .
-cp "$BACKUP_DIR/.env.backup" .env
 
 # 3. Rebuild with old configuration
 docker compose build
@@ -383,7 +373,6 @@ Migration is successful when:
 - ✅ No "permission denied" errors in logs
 - ✅ GPU utilization is normal (40-60% during streaming)
 - ✅ HLS playback works
-- ✅ No environment variables contain secrets
 - ✅ All secrets readable from /run/secrets/
 
 ## Post-Migration Tasks
@@ -393,7 +382,7 @@ Migration is successful when:
 - [ ] Document any issues encountered
 - [ ] Review logs after 24 hours
 - [ ] Compare performance metrics with baseline
-- [ ] Archive old .env with keys securely
+- [ ] Archive any migration .env used for secret initialization
 - [ ] Clean up old Docker images: `docker image prune -a`
 
 ## Support

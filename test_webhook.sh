@@ -5,6 +5,7 @@ set -e
 
 WEBHOOK_URL="${WEBHOOK_URL:-http://localhost:8090}"
 PROFILE="${TEST_PROFILE:-gaming}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.staging.yml}"
 
 echo "=== Webhook Integration Test ==="
 echo "Webhook URL: $WEBHOOK_URL"
@@ -60,9 +61,9 @@ sleep 5
 
 # Test 5: Check if broadcaster processes are running
 echo "[5/6] Checking for active broadcaster processes..."
-if docker compose exec -T nginx-rtmp-staging ps aux | grep -q "[b]roadcaster.*$PROFILE"; then
+if docker compose -f "$COMPOSE_FILE" exec -T nginx-rtmp-staging ps aux | grep -q "[b]roadcaster.*$PROFILE"; then
     echo "✓ Broadcaster process found"
-    docker compose exec -T nginx-rtmp-staging ps aux | grep "[b]roadcaster.*$PROFILE" | head -n3
+    docker compose -f "$COMPOSE_FILE" exec -T nginx-rtmp-staging ps aux | grep "[b]roadcaster.*$PROFILE" | head -n3
 else
     echo "⚠ Warning: Broadcaster process not found (may have already completed)"
 fi
@@ -90,6 +91,6 @@ echo ""
 echo "=== All webhook tests passed! ==="
 echo ""
 echo "Additional verification:"
-echo "- Check webhook logs: docker compose logs webhook"
-echo "- Check broadcaster logs: docker compose exec nginx-rtmp-staging ls -la /var/log/broadcaster/"
+echo "- Check webhook logs: docker compose -f $COMPOSE_FILE logs webhook"
+echo "- Check broadcaster logs: docker compose -f $COMPOSE_FILE exec nginx-rtmp-staging ls -la /var/log/broadcaster/"
 echo "- Check RTMP stats: curl http://localhost:8081/stat"

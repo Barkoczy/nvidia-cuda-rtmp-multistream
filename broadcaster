@@ -67,14 +67,6 @@ escape_sed() {
 # Environment and Configuration
 # --------------------------------------------------
 
-# Retrieves variables if /tmp/.env exists (tmpfs location)
-if [ -f "/tmp/.env" ]; then
-    export $(grep -v '^#' /tmp/.env | xargs)
-    echo "Environment variables loaded from /tmp/.env"
-else
-    echo "Warning: /tmp/.env not found!"
-fi
-
 # Configuration paths
 CONFIG_FILE="/etc/broadcaster/profiles.yml"
 LOG_DIR="/var/log/broadcaster"
@@ -94,8 +86,6 @@ echo "Groups: $(id -G)" >> "$LOG_DIR/debug.log"
 echo "PATH: $PATH" >> "$LOG_DIR/debug.log"
 echo "Arguments: $@" >> "$LOG_DIR/debug.log"
 echo "Working directory: $(pwd)" >> "$LOG_DIR/debug.log"
-echo "Environment variables:" >> "$LOG_DIR/debug.log"
-env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' | sed 's/=.*/=XXXXX/' >> "$LOG_DIR/debug.log"
 echo "File permissions:" >> "$LOG_DIR/debug.log"
 ls -la "$CONFIG_FILE" >> "$LOG_DIR/debug.log" 2>&1
 ls -la "$LOG_DIR" >> "$LOG_DIR/debug.log" 2>&1
@@ -318,7 +308,7 @@ start_stream() {
   echo "  Preset: $preset" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   echo "  Profile: $profile_type" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
 
-  # Try to load key from Docker secret first, then fall back to environment variable
+  # Load key from Docker secret only (no legacy fallback)
   local secret_file="/run/secrets/${PROFILE}_${service}_key"
   local key=""
 
@@ -327,30 +317,13 @@ start_stream() {
     key=$(cat "$secret_file" | tr -d '\n\r')
     echo "Loading key from Docker secret: $secret_file" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   else
-    # Fallback to environment variable (legacy mode)
-    local key_var=$(echo "${PROFILE}_${service}_KEY" | tr '[:lower:]' '[:upper:]')
-    echo "Docker secret not found, checking environment variable: $key_var" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    echo "Error: Secret not found for service $service ($secret_file missing)" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    return 1
+  fi
 
-    key=${!key_var}
-    if [ -z "$key" ]; then
-      echo "Error: No key found for service $service (checked $secret_file and \$${key_var})" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-
-      # Fallback to legacy fixed keys for testing
-      if [ "$service" == "youtube" ]; then
-        key=${YOUTUBE_KEY:-""}
-      elif [ "$service" == "twitch" ]; then
-        key=${TWITCH_KEY:-""}
-      elif [ "$service" == "kick" ]; then
-        key=${KICK_KEY:-""}
-      fi
-
-      if [ -z "$key" ]; then
-        echo "No fallback key found, skipping service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-        return 1
-      else
-        echo "Using legacy fallback key for service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-      fi
-    fi
+  if [ -z "$key" ]; then
+    echo "Error: Secret file is empty for service $service ($secret_file)" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    return 1
   fi
 
   # Check for required values

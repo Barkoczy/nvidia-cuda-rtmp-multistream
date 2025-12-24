@@ -39,7 +39,7 @@ This is a Docker-based NGINX RTMP server that restreams to multiple platforms si
    - Reads `profiles.yml` using `yq` to get service configurations
    - **Secret Loading** (Phase 1):
      - Primary: Reads from Docker secrets at `/run/secrets/{profile}_{service}_key`
-     - Fallback: Environment variables `PROFILENAME_SERVICENAME_KEY` (legacy)
+     - Secrets-only runtime (no environment-variable fallback)
    - Spawns separate FFmpeg process for each configured service
    - Process management via PID files in `/var/log/broadcaster/`
    - Automatically stops existing streams before starting new ones
@@ -83,17 +83,13 @@ RTMP Stream → NGINX (port 1936) → Webhook HTTP POST → Webhook validates �
   - Each profile (e.g., "gaming", "events") contains service configurations
   - Service settings: url, bitrate, framerate, gopSize, preset, profile, scale
 
-- **Docker Secrets** (Phase 1 - Preferred):
+- **Docker Secrets** (Phase 1 - Required):
   - Stored in `/run/secrets/` as read-only files
   - Naming convention: `{profile}_{service}_key` (lowercase, e.g., `gaming_youtube_key`)
   - Permissions: 600 (owner read-only)
   - Not visible in `docker inspect` or process environment
 
-- **Environment Variables** (Legacy fallback):
-  - Format: `PROFILENAME_SERVICENAME_KEY` (all uppercase)
-  - Example: `GAMING_YOUTUBE_KEY`, `GAMING_TWITCH_KEY`
-  - Exported to `/etc/broadcaster/.env` on container startup
-  - Use `./init_secrets.sh` to migrate to Docker secrets
+> Runtime no longer supports environment-variable stream keys. Use `./init_secrets.sh` only as a one-time migration helper.
 
 ### NVIDIA GPU Integration
 
@@ -256,9 +252,6 @@ docker compose exec nginx-rtmp nvidia-smi
 # Verify Docker secrets are mounted
 docker compose exec nginx-rtmp ls -la /run/secrets/
 
-# Verify environment variables are loaded (legacy)
-docker compose exec nginx-rtmp cat /etc/broadcaster/.env
-
 # Test yq and profile parsing
 docker compose exec nginx-rtmp yq e '.gaming' /etc/broadcaster/profiles.yml
 
@@ -327,7 +320,7 @@ When adding new platforms or modifying encoding parameters in profiles.yml:
 
 - **broadcaster**: Bash script with yq-based YAML parsing. Modifying requires understanding:
   - PID file management (broadcaster:74-118)
-  - Docker secrets fallback logic (broadcaster:184-217)
+  - Docker secrets loading (broadcaster)
   - FFmpeg parameter construction (broadcaster:249-269)
 
 - **hls_transcode**: Fixed 3-tier ABR configuration. Changes require understanding fMP4 HLS segmentation.
@@ -418,13 +411,13 @@ docker compose -f docker-compose.staging.yml up -d
 - **Dockerfile.hardened**: Security-hardened multi-stage build (Phase 1)
 - **docker-compose.yml**: Production service definition with GPU reservation and port mappings
 - **docker-compose.staging.yml**: Staging environment with security hardening and observability
-- **entrypoint.sh**: Container initialization, GPU detection, symlink creation, env export
+- **entrypoint.sh**: Container initialization, GPU detection, NVENC smoke test
 - **nginx.conf**: RTMP server config and HTTP endpoints for stats/HLS/logs
 - **nginx.staging.conf**: Staging NGINX config with webhook integration
 - **broadcaster**: Main restreaming orchestrator (profile → FFmpeg processes)
 - **hls_transcode**: ABR HLS stream generator for web playback
 - **profiles.yml**: Streaming profile and service configuration
-- **.env**: Streaming keys storage (not committed to git) - legacy
+- **.env**: Optional one-time input for init_secrets.sh (not used at runtime)
 
 **Security (Phase 1)**:
 - **webhook/main.go**: Go webhook server for secure stream control
@@ -474,8 +467,7 @@ docker compose exec nginx-rtmp ls -la /run/secrets/
 # Check broadcaster is reading secrets
 docker compose exec nginx-rtmp grep "Loading key from Docker secret" /var/log/broadcaster/debug.log
 
-# Fallback to environment variables
-docker compose exec nginx-rtmp cat /etc/broadcaster/.env
+# Runtime uses Docker secrets only; no environment-variable fallback
 ```
 
 ### Webhook Not Responding (Staging)

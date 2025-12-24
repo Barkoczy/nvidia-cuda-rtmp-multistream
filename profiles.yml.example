@@ -1,6 +1,6 @@
 # Stream profiles configuration
-# Streaming keys are loaded from environment variables using naming convention: PROFILE_SERVICE_KEY
-# Example: For profile "gaming" and service "youtube", the key will be loaded from GAMING_YOUTUBE_KEY environment variable
+# Streaming keys are loaded from Docker secrets using naming convention: {profile}_{service}_key
+# Example: For profile "gaming" and service "youtube", the key is read from /run/secrets/gaming_youtube_key
 
 gaming:
   youtube:

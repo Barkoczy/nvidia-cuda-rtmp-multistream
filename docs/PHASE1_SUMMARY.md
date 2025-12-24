@@ -67,7 +67,7 @@ Phase 1 focuses on eliminating critical security vulnerabilities and implementin
 **Implementation**:
 - Stream keys stored in `/run/secrets/` as read-only files
 - Naming convention: `{profile}_{service}_key.txt`
-- Broadcaster script reads from secrets first, falls back to env vars
+- Broadcaster script reads from secrets only (no runtime fallback)
 - Helper script (`init_secrets.sh`) for automated migration
 - Secrets have 600 permissions (owner read-only)
 
@@ -87,10 +87,10 @@ Phase 1 focuses on eliminating critical security vulnerabilities and implementin
 
 **Migration Path**:
 ```bash
-./init_secrets.sh  # Convert .env to secrets
+./init_secrets.sh  # Optional: convert .env to secrets
 # Test in staging
 # Deploy to production
-# Remove keys from .env
+# Archive any migration .env file
 ```
 
 ---
@@ -356,7 +356,7 @@ docker compose down && docker compose build && docker compose up -d
 
 1. **Entrypoint Root Requirement**: Entrypoint must run as root initially for NVIDIA GPU symlink setup, then drops to broadcaster user
 
-2. **Backward Compatibility**: Broadcaster still supports environment variables as fallback for migration period
+2. **Secrets-Only Runtime**: Stream keys must be provided via Docker secrets
 
 3. **Webhook Single Point**: Webhook is single container (no HA) - acceptable for now, will address in Phase 3
 
@@ -424,7 +424,7 @@ git log --oneline feature/phase1-security
 ✅ **Deployment**:
 - Staging environment fully functional
 - Zero-downtime migration path defined
-- Backward compatibility maintained
+- Secrets-only runtime enforced
 
 ---
 
@@ -434,7 +434,7 @@ git log --oneline feature/phase1-security
 
 2. **Capability tuning**: Needed iterative testing to find minimal working set
 
-3. **Secrets migration**: Backward compatibility crucial for smooth transition
+3. **Secrets migration**: One-time conversion helper is sufficient; runtime is secrets-only
 
 4. **Testing importance**: Automated tests caught issues early in staging
 
@@ -442,7 +442,7 @@ git log --oneline feature/phase1-security
 
 ## Team Acknowledgments
 
-Implementation completed autonomously by Claude Code following user's detailed technical specification.
+Implementation completed following the project specification.
 
 ---
 

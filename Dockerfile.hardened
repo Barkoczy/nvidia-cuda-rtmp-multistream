@@ -147,6 +147,7 @@ RUN apt-get update && apt-get install -y \
     libvorbis0a \
     libva2 \
     libva-drm2 \
+    libva-x11-2 \
     libvdpau1 \
     libssl3 \
     ca-certificates \

@@ -97,16 +97,15 @@ GF_SECURITY_ADMIN_USER=admin      ⚠️ Default, needs change
 
 ### Secret Access in Code
 
-**broadcaster script** (`broadcaster:184-217`):
+**broadcaster script** (`broadcaster`):
 ```bash
 # Primary: Docker secrets
 key_file="/run/secrets/${profile}_${platform}_key"
 if [ -f "$key_file" ]; then
     stream_key=$(cat "$key_file")
-# Fallback: Environment variables (legacy)
 else
-    env_var="${PROFILE_UPPER}_${platform_upper}_KEY"
-    stream_key="${!env_var}"
+    echo "Missing secret for ${profile}/${platform}"
+    exit 1
 fi
 ```
 

@@ -45,11 +45,10 @@ services:
       - "8080:8080" # HTTP status page
     container_name: nginx-rtmp
     # Note: Container starts as root for entrypoint setup (GPU, chown), NGINX runs as broadcaster user
-    env_file:
-      - .env
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: all
+    runtime: nvidia
     volumes:
       - ./logs:/var/log/broadcaster
       - ./logs/nginx:/var/log/nginx
@@ -92,7 +91,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu, video]
+              capabilities: [gpu]
     restart: unless-stopped
     networks:
       - streaming

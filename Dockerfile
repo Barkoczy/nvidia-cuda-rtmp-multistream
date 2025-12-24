@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     libtheora-dev \
     libtool \
     libva-dev \
+    libva-x11-2 \
     libvdpau-dev \
     libvorbis-dev \
     libxcb1-dev \

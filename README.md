@@ -17,35 +17,45 @@ A Docker-based NGINX RTMP server leveraging NVIDIA GPU hardware acceleration for
 - Docker and Docker Compose
 - NVIDIA GPU with compatible drivers
 - NVIDIA Container Toolkit
-- NVIDIA Driver version **525.60.13+** (required for CUDA 12.x runtime)
+- NVIDIA Driver version **525.60.13+** (minimum for CUDA 12.x minor compatibility)
+- Recommended for CUDA **12.8 GA** toolkit: NVIDIA Driver **570.26+**
+- NVENC is required; the container exits if GPU access is unavailable
 
 ## Quick Start
 
 1. Copy configuration files:
 ```bash
-cp .env.example .env
 cp profiles.yml.example profiles.yml
 ```
 
-2. Configure your streaming keys (preferred: Docker secrets):
+2. Configure your streaming keys (Docker secrets only):
 ```bash
+# Option A: Initialize from .env.example (one-time migration helper)
+cp .env.example .env
 ./init_secrets.sh
-```
-If you are using secrets only, you can create an empty `.env` to silence Docker Compose warnings:
-```bash
-touch .env
-```
 
-Legacy fallback (environment variables in `.env`):
-```
-GAMING_YOUTUBE_KEY=your_youtube_key
-GAMING_TWITCH_KEY=your_twitch_key
-GAMING_KICK_KEY=your_kick_key
+# Option B: Create secrets manually
+echo "your-youtube-key" > secrets/gaming_youtube_key.txt
+echo "your-twitch-key" > secrets/gaming_twitch_key.txt
+chmod 600 secrets/*.txt
 ```
 
 3. Start the container:
 ```bash
 docker compose up -d
+```
+
+## Testing
+
+```bash
+# Security + GPU/NVENC checks
+./test_security.sh
+
+# Webhook integration
+./test_webhook.sh
+
+# NVENC load test (parallel encodes inside container)
+./scripts/load_test.sh
 ```
 
 ## Configuration
@@ -75,18 +85,12 @@ profile_name:
 
 ### Stream Keys
 
-Stream keys are loaded from Docker secrets (recommended) or environment variables (legacy).
+Stream keys are loaded from Docker secrets only.
 
 Docker secrets naming convention:
 ```
 {profile}_{service}_key.txt
 ```
-
-Legacy environment variable naming convention:
-```
-PROFILE_SERVICE_KEY
-```
-Example: For profile "gaming" and service "youtube", the key will be loaded from `GAMING_YOUTUBE_KEY`
 
 ### Webhook Authorization (Secure Default)
 
@@ -172,7 +176,7 @@ twitch:
   scale: 1920x1080
 ```
 
-This configuration is now fully updated with all adjustments made for **Twitch** using **NVIDIA NVENC**. Let me know if you need further adjustments or additional platforms!
+This configuration is now fully updated with all adjustments made for **Twitch** using **NVIDIA NVENC**.
 
 ### Kick Encoder RTMP Stream Settings - YAML Configuration Table
 
