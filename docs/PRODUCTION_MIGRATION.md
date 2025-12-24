@@ -330,7 +330,7 @@ docker compose up -d --force-recreate nginx-rtmp
 **Solution**:
 ```bash
 # Fix ownership on host
-sudo chown -R 1000:1000 logs/
+sudo chown -R 1001:1001 logs/
 sudo chmod -R 755 logs/
 
 # Restart container

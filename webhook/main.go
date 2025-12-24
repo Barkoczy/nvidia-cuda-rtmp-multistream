@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -38,6 +39,16 @@ func main() {
 		port = "8090"
 	}
 
+	if logFile := os.Getenv("WEBHOOK_LOG_FILE"); logFile != "" {
+		if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+			log.Printf("Failed to create log directory: %v", err)
+		} else if file, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err != nil {
+			log.Printf("Failed to open log file: %v", err)
+		} else {
+			log.SetOutput(file)
+		}
+	}
+
 	log.Printf("Starting webhook server on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
@@ -51,16 +62,11 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse form data (NGINX RTMP sends application/x-www-form-urlencoded)
-	if err := r.ParseForm(); err != nil {
-		log.Printf("Error parsing form: %v", err)
+	req, err := parsePublishRequest(r)
+	if err != nil {
+		log.Printf("Error parsing request: %v", err)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
-	}
-
-	req := PublishRequest{
-		Name: r.FormValue("name"),
-		App:  r.FormValue("app"),
 	}
 
 	// Sanitize profile name to prevent command injection
@@ -102,16 +108,11 @@ func handlePublishDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse form data (NGINX RTMP sends application/x-www-form-urlencoded)
-	if err := r.ParseForm(); err != nil {
-		log.Printf("Error parsing form: %v", err)
+	req, err := parsePublishRequest(r)
+	if err != nil {
+		log.Printf("Error parsing request: %v", err)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
-	}
-
-	req := PublishRequest{
-		Name: r.FormValue("name"),
-		App:  r.FormValue("app"),
 	}
 
 	profile := sanitizeProfileName(req.Name)
@@ -163,6 +164,26 @@ func sanitizeProfileName(name string) string {
 	}
 
 	return sanitized
+}
+
+func parsePublishRequest(r *http.Request) (PublishRequest, error) {
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "application/json") {
+		var req PublishRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return PublishRequest{}, err
+		}
+		return req, nil
+	}
+
+	if err := r.ParseForm(); err != nil {
+		return PublishRequest{}, err
+	}
+
+	return PublishRequest{
+		Name: r.FormValue("name"),
+		App:  r.FormValue("app"),
+	}, nil
 }
 
 // startBroadcaster executes the broadcaster script for the given profile

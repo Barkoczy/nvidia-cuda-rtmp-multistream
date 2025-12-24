@@ -1,11 +1,13 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # --------------------------------------------------
 # Shared Logging Helper (logfmt format)
 # --------------------------------------------------
 
 LOG_COMPONENT="${LOG_COMPONENT:-broadcaster}"
+STOP_MODE=false
+PROFILE=""
 
 log_ts() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -52,6 +54,14 @@ log_info()  { log info  "$@"; }
 log_warn()  { log warn  "$@"; }
 log_error() { log error "$@"; }
 log_debug() { log debug "$@"; }
+
+is_valid_profile_name() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{1,50}$ ]]
+}
+
+escape_sed() {
+  printf '%s' "$1" | sed -e 's/[.[\\^$*+?{}|()]/\\&/g' -e 's#/#\\/#g'
+}
 
 # --------------------------------------------------
 # Environment and Configuration
@@ -114,6 +124,11 @@ done
 # Check if profile was provided
 if [ -z "$PROFILE" ]; then
   echo "Error: No profile specified. Use --profile PROFILE_NAME" | tee -a "$LOG_DIR/debug.log"
+  exit 1
+fi
+
+if ! is_valid_profile_name "$PROFILE"; then
+  echo "Error: Invalid profile name '$PROFILE' (allowed: A-Z a-z 0-9 _ -)" | tee -a "$LOG_DIR/debug.log"
   exit 1
 fi
 
@@ -198,20 +213,25 @@ fi
 
 # FFmpeg wrapper function with telemetry
 run_ffmpeg() {
-  local codec="$1"
-  local preset="$2"
-  local codec_profile="$3"
-  local bitrate="$4"
-  local gopsize="$5"
-  local framerate="$6"
-  local scale_filter="$7"
-  local output_url="$8"
+  local service_name="$1"
+  local base_url="$2"
+  local codec="$3"
+  local preset="$4"
+  local codec_profile="$5"
+  local bitrate="$6"
+  local gopsize="$7"
+  local framerate="$8"
+  local scale_filter="$9"
+  local output_url="${10}"
 
   local start_ns end_ns duration_ms exit_code
-  local safe_url="${url}/XXXXXX"  # Hide key in logs
+  local safe_url="${base_url}/REDACTED"
+  local base_url_escaped
+
+  base_url_escaped=$(escape_sed "$base_url")
 
   # Set context for logging
-  export TARGET="${service}"
+  export TARGET="${service_name}"
   export STREAM_ID="${PROFILE}_${TARGET}_$(date -u +%Y%m%d_%H%M%S)"
 
   # Log FFmpeg start
@@ -230,10 +250,10 @@ run_ffmpeg() {
       -r $framerate \
       $scale_filter \
       -c:a aac -ar 44100 -b:a 128k \
-      -f flv $output_url 2>&1 | tee -a "$LOG_FILE"
+      -f flv "$output_url" 2>&1 | sed -E "s#${base_url_escaped}/[^[:space:]]+#${base_url}/REDACTED#g" | tee -a "$LOG_FILE"
 
-    # Capture exit code
-    exit_code=$?
+    # Capture exit code from FFmpeg (first command in pipeline)
+    exit_code=${PIPESTATUS[0]}
 
     # Calculate duration
     end_ns=$(date +%s%N 2>/dev/null || echo $(($(date +%s) * 1000000000)))
@@ -247,12 +267,12 @@ run_ffmpeg() {
     fi
 
     # Write exit code to file for monitoring
-    echo "$exit_code" > "$LOG_DIR/${PROFILE}_${service}.exitcode"
+    echo "$exit_code" > "$LOG_DIR/${PROFILE}_${service_name}.exitcode"
   ) &
 
   # Save process PID
   local pid=$!
-  echo $pid > "$LOG_DIR/${PROFILE}_${service}.pid"
+  echo $pid > "$LOG_DIR/${PROFILE}_${service_name}.pid"
 
   log_info stream_started "Stream process spawned" pid "$pid"
 }
@@ -361,7 +381,7 @@ start_stream() {
   log_info service_config "Configuring stream for service" codec "$codec" profile "$codec_profile" bitrate "$bitrate" framerate "$framerate" gopsize "$gopsize" preset "$preset" scale "$scale_filter"
 
   # Launch FFmpeg using wrapper with telemetry
-  run_ffmpeg "$codec" "$preset" "$codec_profile" "$bitrate" "$gopsize" "$framerate" "$scale_filter" "$output_url"
+  run_ffmpeg "$service" "$url" "$codec" "$preset" "$codec_profile" "$bitrate" "$gopsize" "$framerate" "$scale_filter" "$output_url"
 }
 
 # Start streams for all configured services

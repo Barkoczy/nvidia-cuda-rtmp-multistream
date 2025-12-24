@@ -6,11 +6,14 @@ services:
       dockerfile: Dockerfile
     container_name: webhook-staging
     restart: unless-stopped
-    # NO external ports - internal Docker network only
-    expose:
-      - "8090"
+    # Local-only port for testing and health checks
+    ports:
+      - "127.0.0.1:8090:8090"
     environment:
       - WEBHOOK_PORT=8090
+      - WEBHOOK_LOG_FILE=/var/log/webhook/webhook.log
+    volumes:
+      - ./logs-staging/webhook:/var/log/webhook
     networks:
       - streaming
     # Security: Read-only root filesystem
@@ -47,6 +50,7 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: all
     volumes:
       - ./logs-staging:/var/log/broadcaster
+      - ./logs-staging/nginx:/var/log/nginx
       - ./profiles.yml:/etc/broadcaster/profiles.yml:ro
       - ./nginx.staging.conf:/usr/local/nginx/conf/nginx.conf:ro
       - /tmp/hls:/tmp/hls
@@ -55,7 +59,6 @@ services:
       - /tmp
       - /var/run
       - /var/cache/nginx
-      - /var/log/nginx
       - /usr/local/nginx/logs
       - /usr/local/nginx/client_body_temp
       - /usr/local/nginx/proxy_temp
@@ -101,7 +104,7 @@ services:
     container_name: prometheus-staging
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -136,7 +139,7 @@ services:
     container_name: grafana-staging
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     env_file:
       - .env.grafana
     environment:
@@ -173,7 +176,7 @@ services:
     container_name: loki-staging
     restart: unless-stopped
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     command: -config.file=/etc/loki/config.yml
     volumes:
       - ./observability/loki-config.yml:/etc/loki/config.yml:ro
@@ -198,12 +201,13 @@ services:
     command: -config.file=/etc/promtail/config.yml
     volumes:
       - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./logs-staging:/var/log/broadcaster:ro
+      - ./logs-staging/nginx:/var/log/nginx:ro
+      - ./logs-staging/webhook:/var/log/webhook:ro
     networks:
       - streaming
-    # Security: User (needs root for Docker socket access)
-    # Cannot change user for Promtail - requires Docker socket access
+    # Security: Run as non-root
+    user: "10001:10001"
     # Security: Read-only root filesystem
     read_only: true
     tmpfs:
@@ -235,8 +239,6 @@ services:
       - /:/host:ro
     networks:
       - streaming
-    ports:
-      - "9100:9100"
     # Security: User (official image uses nobody:65534)
     user: "65534:65534"
     # Security: Read-only root filesystem
@@ -265,8 +267,6 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
-    ports:
-      - "8082:8080"
     networks:
       - streaming
 
@@ -279,8 +279,6 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
-    ports:
-      - "9400:9400"
     deploy:
       resources:
         reservations:
@@ -312,8 +310,6 @@ services:
       - NGINX_STATUS=http://nginx-rtmp-staging:8080/status/format/json
     command:
       - '-nginx.scrape_uri=http://nginx-rtmp-staging:8080/status/format/json'
-    ports:
-      - "9913:9913"
     networks:
       - streaming
     depends_on:

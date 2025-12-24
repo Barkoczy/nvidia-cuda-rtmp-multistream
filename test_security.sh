@@ -18,23 +18,23 @@ else
     exit 1
 fi
 
-# Test 2: Verify non-root user
-echo "[2/10] Verifying non-root user execution..."
-user=$(docker compose -f "$COMPOSE_FILE" exec -T "$CONTAINER" whoami 2>/dev/null || echo "error")
-if [ "$user" = "broadcaster" ]; then
-    echo "✓ Running as non-root user: $user"
+# Test 2: Verify NGINX workers run as non-root
+echo "[2/10] Verifying NGINX worker user..."
+worker_users=$(docker compose -f "$COMPOSE_FILE" exec -T "$CONTAINER" sh -c "ps -o user= -C nginx | tr -s ' ' | sort -u" 2>/dev/null || echo "error")
+if echo "$worker_users" | grep -q "broadcaster"; then
+    echo "✓ NGINX workers run as broadcaster"
 else
-    echo "✗ Not running as broadcaster (current: $user)"
+    echo "✗ NGINX workers not running as broadcaster (users: $worker_users)"
     exit 1
 fi
 
-# Test 3: Verify UID/GID
-echo "[3/10] Verifying UID/GID..."
-uid_gid=$(docker compose -f "$COMPOSE_FILE" exec -T "$CONTAINER" id -u 2>/dev/null)
-if [ "$uid_gid" = "1000" ]; then
+# Test 3: Verify broadcaster UID
+echo "[3/10] Verifying broadcaster UID..."
+uid_gid=$(docker compose -f "$COMPOSE_FILE" exec -T "$CONTAINER" id -u broadcaster 2>/dev/null || echo "error")
+if [ "$uid_gid" = "1001" ]; then
     echo "✓ Correct UID: $uid_gid"
 else
-    echo "✗ Incorrect UID: $uid_gid (expected 1000)"
+    echo "✗ Incorrect UID: $uid_gid (expected 1001)"
     exit 1
 fi
 

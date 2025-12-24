@@ -17,7 +17,7 @@ A Docker-based NGINX RTMP server leveraging NVIDIA GPU hardware acceleration for
 - Docker and Docker Compose
 - NVIDIA GPU with compatible drivers
 - NVIDIA Container Toolkit
-- NVIDIA Driver version 450.80.02 or higher
+- NVIDIA Driver version **525.60.13+** (required for CUDA 12.x runtime)
 
 ## Quick Start
 
@@ -27,7 +27,16 @@ cp .env.example .env
 cp profiles.yml.example profiles.yml
 ```
 
-2. Configure your streaming keys in .env:
+2. Configure your streaming keys (preferred: Docker secrets):
+```bash
+./init_secrets.sh
+```
+If you are using secrets only, you can create an empty `.env` to silence Docker Compose warnings:
+```bash
+touch .env
+```
+
+Legacy fallback (environment variables in `.env`):
 ```
 GAMING_YOUTUBE_KEY=your_youtube_key
 GAMING_TWITCH_KEY=your_twitch_key
@@ -66,11 +75,22 @@ profile_name:
 
 ### Stream Keys
 
-Stream keys are loaded from environment variables using the naming convention:
+Stream keys are loaded from Docker secrets (recommended) or environment variables (legacy).
+
+Docker secrets naming convention:
+```
+{profile}_{service}_key.txt
+```
+
+Legacy environment variable naming convention:
 ```
 PROFILE_SERVICE_KEY
 ```
 Example: For profile "gaming" and service "youtube", the key will be loaded from `GAMING_YOUTUBE_KEY`
+
+### Webhook Authorization (Secure Default)
+
+The RTMP ingest flow uses a webhook (`/api/v1/publish`) for authorization before starting any transcoding or restreaming. This prevents unsafe command execution and blocks invalid profile names at the edge.
 
 ### YouTube RTMP Stream Settings - YAML Configuration Table
 | **Setting**        | **Resolution**   | **Framerate** | **gopSize** | **Video Bitrate**     | **Example YAML**                        |

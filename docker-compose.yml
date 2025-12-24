@@ -1,12 +1,50 @@
 services:
+  # Webhook server for secure RTMP event handling
+  webhook:
+    build:
+      context: ./webhook
+      dockerfile: Dockerfile
+    container_name: webhook
+    restart: unless-stopped
+    # Local-only port for testing and health checks
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      - WEBHOOK_PORT=8090
+      - WEBHOOK_LOG_FILE=/var/log/webhook/webhook.log
+    volumes:
+      - ./logs/webhook:/var/log/webhook
+    networks:
+      - streaming
+    # Security: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
   nginx-rtmp:
+    image: nvidia-cuda-rtmp-multistream-nginx-rtmp:latest
     build:
       context: .
+      dockerfile: Dockerfile.hardened
       args:
         - USE_NVIDIA=true
     ports:
       - "1935:1935" # RTMP
       - "8080:8080" # HTTP status page
+    container_name: nginx-rtmp
+    # Note: Container starts as root for entrypoint setup (GPU, chown), NGINX runs as broadcaster user
     env_file:
       - .env
     environment:
@@ -14,12 +52,64 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: all
     volumes:
       - ./logs:/var/log/broadcaster
-      - ./profiles.yml:/etc/broadcaster/profiles.yml
+      - ./logs/nginx:/var/log/nginx
+      - ./profiles.yml:/etc/broadcaster/profiles.yml:ro
+      - ./nginx.conf:/usr/local/nginx/conf/nginx.conf:ro
+      - ./hls:/tmp/hls
+    # Tmpfs volumes for read-only root filesystem
+    tmpfs:
+      - /tmp
+      - /var/run
+      - /var/cache/nginx
+      - /usr/local/nginx/logs
+      - /usr/local/nginx/client_body_temp
+      - /usr/local/nginx/proxy_temp
+      - /usr/local/nginx/fastcgi_temp
+      - /usr/local/nginx/uwsgi_temp
+      - /usr/local/nginx/scgi_temp
+    secrets:
+      - gaming_youtube_key
+      - gaming_twitch_key
+      - gaming_kick_key
+      - gaming_x_key
+    # Security: Read-only root filesystem
+    read_only: true
+    # Security: Drop all capabilities except required ones
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN          # For log file ownership
+      - DAC_OVERRIDE   # For writing to mounted volumes
+      - SETGID         # For group changes
+      - SETUID         # For user changes
+      - NET_BIND_SERVICE  # For binding to ports
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [gpu, video]
     restart: unless-stopped
+    networks:
+      - streaming
+    depends_on:
+      webhook:
+        condition: service_healthy
+
+secrets:
+  gaming_youtube_key:
+    file: ./secrets/gaming_youtube_key.txt
+  gaming_twitch_key:
+    file: ./secrets/gaming_twitch_key.txt
+  gaming_kick_key:
+    file: ./secrets/gaming_kick_key.txt
+  gaming_x_key:
+    file: ./secrets/gaming_x_key.txt
+
+networks:
+  streaming:
+    driver: bridge

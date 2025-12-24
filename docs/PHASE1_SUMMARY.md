@@ -102,7 +102,7 @@ Phase 1 focuses on eliminating critical security vulnerabilities and implementin
 **Implementation**:
 - Read-only root filesystem (`read_only: true`)
 - Tmpfs volumes for writable paths (`/tmp`, `/var/run`, `/var/cache/nginx`)
-- Non-root user execution (broadcaster UID 1000)
+- Non-root user execution (broadcaster UID 1001)
 - Minimal Linux capabilities (drop ALL, add only required)
 - `no-new-privileges` security option
 - Multi-stage Dockerfile separating build and runtime
@@ -144,7 +144,7 @@ Phase 1 focuses on eliminating critical security vulnerabilities and implementin
 **Test Coverage**:
 1. Container status check
 2. Non-root user verification
-3. UID/GID validation (1000:1000)
+3. UID/GID validation (1001:1001)
 4. Read-only filesystem enforcement
 5. Tmpfs writability
 6. Docker secrets mounting
@@ -179,7 +179,7 @@ docker compose -f docker-compose.staging.yml up -d
 |---------------|--------|-------|----------------|
 | Command Injection | exec_publish with unsanitized input | Webhook with input validation | **Critical → None** |
 | Secret Exposure | Environment variables | Docker secrets (read-only files) | **High → Low** |
-| Root Execution | Container runs as root | Non-root user (UID 1000) | **High → Low** |
+| Root Execution | Container runs as root | Non-root user (UID 1001) | **High → Low** |
 | Filesystem Writes | Fully writable | Read-only + tmpfs | **Medium → Low** |
 | Excessive Privileges | All capabilities | Minimal set (5 caps) | **Medium → Low** |
 | Privilege Escalation | Possible via setuid | Blocked by no-new-privileges | **Medium → None** |

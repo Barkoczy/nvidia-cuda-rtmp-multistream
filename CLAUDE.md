@@ -16,10 +16,10 @@ This is a Docker-based NGINX RTMP server that restreams to multiple platforms si
 1. **NGINX RTMP Server** (nginx.conf:10-35)
    - Listens on port 1935 for incoming RTMP streams
    - Application endpoint: `rtmp://localhost:1935/live/PROFILE_NAME`
-   - **Staging**: Uses port 1936 and calls webhook instead of direct exec
+   - **Staging**: Uses port 1936 and webhook authorization (same flow as production)
    - Triggers two mechanisms when a stream starts:
-     - **Production**: `exec_publish` - Directly executes scripts (legacy)
-     - **Staging**: `on_publish` webhook - HTTP POST to webhook service (secure)
+     - **Webhook authorization**: `on_publish` - HTTP POST to webhook service (secure)
+     - **Process start**: `exec_publish` - Executes scripts after webhook approval
    - Scripts/endpoints triggered:
      - `hls_transcode`: Creates HLS adaptive bitrate streams for playback
      - `broadcaster`: Spawns FFmpeg processes to restream to configured platforms
@@ -112,7 +112,7 @@ RTMP Stream → NGINX (port 1936) → Webhook HTTP POST → Webhook validates �
 ### Security Features (Phase 1)
 
 - **Read-only root filesystem**: Container uses `read_only: true` with tmpfs for writable paths
-- **Non-root execution**: Runs as `broadcaster` user (UID 1000)
+- **Non-root execution**: NGINX worker processes run as `broadcaster` (UID 1001); master process runs as root for setup
 - **Minimal capabilities**: Only 5 Linux capabilities (CHOWN, DAC_OVERRIDE, SETGID, SETUID, NET_BIND_SERVICE)
 - **no-new-privileges**: Prevents privilege escalation
 - **Docker secrets**: Stream keys never exposed in environment or logs
@@ -300,8 +300,8 @@ docker compose exec nginx-rtmp pkill -9 ffmpeg
 
 **Production** (`docker-compose.yml`):
 - Ports: 1935 (RTMP), 8080 (HTTP)
-- Uses `exec_publish` (legacy, vulnerable to command injection)
-- Direct script execution
+- Uses webhook authorization (`on_publish`) before process start
+- Direct script execution without shell wrapper
 
 **Staging** (`docker-compose.staging.yml`):
 - Ports: 1936 (RTMP), 8081 (HTTP), 8090 (Webhook)
@@ -332,8 +332,7 @@ When adding new platforms or modifying encoding parameters in profiles.yml:
 
 - **hls_transcode**: Fixed 3-tier ABR configuration. Changes require understanding fMP4 HLS segmentation.
 
-- **nginx.conf**: RTMP and HTTP server config. Changes to `exec_publish` directives affect stream lifecycle.
-  - **Staging**: Use `on_publish` webhook instead of `exec_publish`
+- **nginx.conf**: RTMP and HTTP server config. Changes to `on_publish`/`exec_publish` directives affect stream lifecycle.
 
 - **webhook/main.go**: Webhook server for secure stream control. Modify to add:
   - Additional validation rules
@@ -351,8 +350,8 @@ When adding new platforms or modifying encoding parameters in profiles.yml:
 
 ### Container User Permissions
 
-- Container runs NGINX as user `broadcaster` (created in Dockerfile:138)
-- **Staging**: Runs as UID 1000 for security
+- Container runs NGINX workers as user `broadcaster` (created in Dockerfile.hardened)
+- **Staging/Production**: UID 1001 for security and consistency
 - All scripts, logs, and config files owned by `broadcaster:broadcaster`
 - Permissions set in Dockerfile:142-150 and entrypoint.sh:67-83
 - If adding new directories/files, ensure proper ownership for `broadcaster` user

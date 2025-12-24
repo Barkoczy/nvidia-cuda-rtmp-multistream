@@ -7,7 +7,7 @@ This document explains the security hardening measures implemented in the RTMP m
 | Feature | Before | After | Security Benefit |
 |---------|--------|-------|------------------|
 | Root Filesystem | Read-Write | **Read-Only** | Prevents runtime modifications |
-| User | root | **broadcaster (UID 1000)** | Principle of least privilege |
+| User | root | **broadcaster (UID 1001)** | Principle of least privilege |
 | Capabilities | All | **Minimal set** | Reduces attack surface |
 | New Privileges | Allowed | **Blocked** | Prevents privilege escalation |
 | Secrets | Environment vars | **Docker secrets** | Secure key management |
@@ -68,8 +68,8 @@ cap_add:
 |------------|--------------|---------|
 | `CHOWN` | Setting log file ownership | `chown broadcaster:broadcaster /var/log/broadcaster/*.log` |
 | `DAC_OVERRIDE` | Writing to mounted volumes | Writing logs despite file permissions |
-| `SETGID` | Switching to broadcaster group | `setgid(1000)` in entrypoint |
-| `SETUID` | Switching to broadcaster user | `setuid(1000)` in entrypoint |
+| `SETGID` | Switching to broadcaster group | `setgid(1001)` in entrypoint |
+| `SETUID` | Switching to broadcaster user | `setuid(1001)` in entrypoint |
 | `NET_BIND_SERVICE` | Binding NGINX to port 1935/8080 | RTMP and HTTP servers |
 
 ### Capabilities NOT Needed
@@ -87,34 +87,20 @@ These are explicitly dropped for security:
 ### User Configuration
 
 ```yaml
-user: "1000:1000"  # broadcaster:broadcaster
+# Optional hardening: run container fully as non-root (requires entrypoint adjustments)
+# user: "1001:1001"  # broadcaster:broadcaster
 ```
 
-The container runs as the `broadcaster` user (UID 1000, GID 1000), created in the Dockerfile:
+NGINX worker processes run as the `broadcaster` user (UID 1001, GID 1001), created in the Dockerfile:
 
 ```dockerfile
-RUN groupadd -g 1000 broadcaster && \
-    useradd -u 1000 -g broadcaster -s /bin/bash -m broadcaster
+RUN groupadd -g 1001 broadcaster && \
+    useradd -u 1001 -g broadcaster -s /bin/bash -m broadcaster
 ```
 
 ### Entrypoint Behavior
 
-The entrypoint script runs as root initially (for GPU setup), then drops to broadcaster:
-
-```bash
-#!/bin/bash
-# Initial setup as root
-if [ "$(id -u)" = "0" ]; then
-    # Setup NVIDIA symlinks
-    # ...
-
-    # Drop to broadcaster user
-    exec su-exec broadcaster "$0" "$@"
-fi
-
-# Rest runs as broadcaster
-nginx -g "daemon off;"
-```
+The entrypoint script runs as root for GPU setup and filesystem preparation, while NGINX workers run as `broadcaster` via the `user broadcaster;` directive in NGINX config.
 
 ## No New Privileges
 
@@ -214,7 +200,7 @@ docker compose exec nginx-rtmp-staging whoami
 # Expected: broadcaster
 
 docker compose exec nginx-rtmp-staging id
-# Expected: uid=1000(broadcaster) gid=1000(broadcaster) groups=1000(broadcaster),44(video)
+# Expected: uid=1001(broadcaster) gid=1001(broadcaster) groups=1001(broadcaster),44(video)
 ```
 
 ### Verify Capabilities
@@ -238,7 +224,7 @@ docker compose exec nginx-rtmp-staging su root
 
 ## Security Audit Checklist
 
-- [ ] Container runs as non-root user (UID 1000)
+- [ ] Container runs as non-root user (UID 1001)
 - [ ] Root filesystem is read-only
 - [ ] Tmpfs volumes exist for writable paths
 - [ ] Only minimal capabilities granted
@@ -260,7 +246,7 @@ docker compose exec nginx-rtmp-staging su root
 ```bash
 # On host
 ls -la logs-staging/
-chown -R 1000:1000 logs-staging/
+chown -R 1001:1001 logs-staging/
 ```
 
 ### "Read-only file system" errors
@@ -319,7 +305,7 @@ deploy:
 
 | CIS Control | Status | Implementation |
 |-------------|--------|----------------|
-| 5.1 - No root user | ✅ | `user: "1000:1000"` |
+| 5.1 - No root user | ✅ | `user: "1001:1001"` |
 | 5.3 - Read-only filesystem | ✅ | `read_only: true` |
 | 5.15 - No new privileges | ✅ | `no-new-privileges:true` |
 | 5.24 - cgroup limits | ⚠️ | GPU limits set |

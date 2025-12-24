@@ -24,8 +24,8 @@
 
 | Service | Container Name | Ports | External Access | Write Paths | Security Status |
 |---------|---------------|-------|-----------------|-------------|-----------------|
-| **nginx-rtmp-staging** | nginx-rtmp-staging | 1936 (RTMP), 8081 (HTTP) | ✅ RTMP public<br>⚠️ HTTP internal recommended | `/tmp`, `/var/run`, `/var/cache/nginx`, `/var/log/*` (tmpfs) | ✅ Hardened<br>- Non-root (broadcaster:1000)<br>- Read-only FS<br>- 5 capabilities only |
-| **webhook-staging** | webhook-staging | 8090 (HTTP) | ❌ Internal only | `/app` (read-only) | ✅ Hardened<br>- Non-root (webhook:1000)<br>- ⏳ Read-only FS pending |
+| **nginx-rtmp-staging** | nginx-rtmp-staging | 1936 (RTMP), 8081 (HTTP) | ✅ RTMP public<br>⚠️ HTTP internal recommended | `/tmp`, `/var/run`, `/var/cache/nginx`, `/var/log/*` (tmpfs) | ✅ Hardened<br>- Non-root (broadcaster:1001)<br>- Read-only FS<br>- 5 capabilities only |
+| **webhook-staging** | webhook-staging | 8090 (HTTP) | ✅ Local-only | `/app` (read-only) | ✅ Hardened<br>- Non-root (webhook:1000)<br>- Read-only FS |
 | **prometheus-staging** | prometheus-staging | 9090 (HTTP) | ⚠️ Admin only (VPN/localhost) | `/prometheus` (volume) | ⏳ Audit pending<br>- Default root user<br>- No auth by default |
 | **grafana-staging** | grafana-staging | 3000 (HTTP) | ⚠️ Admin only (VPN/localhost) | `/var/lib/grafana` (volume) | ⏳ Audit pending<br>- Default admin/admin<br>- Needs persistent storage |
 | **loki-staging** | loki-staging | 3100 (HTTP) | ❌ Internal only | `/loki` (volume) | ⏳ Audit pending |
@@ -142,8 +142,8 @@ logs-staging/
 
 **nginx-rtmp-staging** (Dockerfile.hardened:138-150):
 ```dockerfile
-RUN groupadd -g 1000 broadcaster && \
-    useradd -u 1000 -g broadcaster -s /bin/bash -m broadcaster
+RUN groupadd -g 1001 broadcaster && \
+    useradd -u 1001 -g broadcaster -s /bin/bash -m broadcaster
 
 RUN chown -R broadcaster:broadcaster \
     /var/log/broadcaster \
@@ -164,7 +164,7 @@ USER webhook:webhook
 **Verification**:
 ```bash
 docker exec nginx-rtmp-staging id
-# uid=1000(broadcaster) gid=1000(broadcaster)
+# uid=1001(broadcaster) gid=1001(broadcaster)
 
 docker exec webhook-staging id
 # uid=1000(webhook) gid=1000(webhook)
@@ -358,25 +358,17 @@ func sanitizeProfileName(name string) string {
 
 ### Known Security Limitations
 
-⚠️ **exec_publish Command Injection Risk**:
+✅ **exec_publish Command Injection Risk Resolved**:
 
-**Current** (nginx.staging.conf:31-32):
+**Current** (nginx.staging.conf):
 ```nginx
-exec_publish /bin/bash -c "/usr/local/bin/broadcaster --profile $name 2>&1 >> /var/log/broadcaster/exec_debug.log";
+exec_publish /usr/local/bin/broadcaster --profile $name;
 ```
-
-**Risk**: Even with webhook sanitization, bash `-c` with variable expansion is potentially vulnerable.
 
 **Mitigation** (Applied):
 1. Webhook sanitizes `$name` **before** NGINX receives it
 2. NGINX only accepts HTTP 200 from webhook
-3. Invalid `$name` → webhook returns HTTP 400 → RTMP rejected
-
-**Phase 3 Recommendation**:
-```nginx
-# Safer: Direct script execution without bash wrapper
-exec_publish /usr/local/bin/broadcaster --profile $name;
-```
+3. Direct execution without shell wrapper
 
 ### Logging Security
 

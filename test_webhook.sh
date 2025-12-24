@@ -12,7 +12,7 @@ echo "Test Profile: $PROFILE"
 echo ""
 
 # Test 1: Health check
-echo "[1/5] Testing health endpoint..."
+echo "[1/6] Testing health endpoint..."
 response=$(curl -s -o /dev/null -w "%{http_code}" "$WEBHOOK_URL/health")
 if [ "$response" = "200" ]; then
     echo "✓ Health check passed (HTTP $response)"
@@ -22,10 +22,10 @@ else
 fi
 
 # Test 2: Publish event (stream start)
-echo "[2/5] Testing publish event..."
+echo "[2/6] Testing publish event..."
 response=$(curl -s -X POST "$WEBHOOK_URL/api/v1/publish" \
-    -H "Content-Type: application/json" \
-    -d "{\"name\":\"$PROFILE\",\"app\":\"live\"}" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "name=$PROFILE&app=live" \
     -w "\n%{http_code}")
 
 http_code=$(echo "$response" | tail -n1)
@@ -41,11 +41,25 @@ else
 fi
 
 # Test 3: Wait for processes to start
-echo "[3/5] Waiting for processes to start (5 seconds)..."
+echo "[3/6] Testing invalid profile rejection..."
+response=$(curl -s -X POST "$WEBHOOK_URL/api/v1/publish" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "name=bad;rm%20-rf&app=live" \
+    -w "\n%{http_code}")
+
+http_code=$(echo "$response" | tail -n1)
+if [ "$http_code" = "400" ]; then
+    echo "✓ Invalid profile rejected (HTTP $http_code)"
+else
+    echo "⚠ Warning: Invalid profile not rejected (HTTP $http_code)"
+fi
+
+# Test 4: Wait for processes to start
+echo "[4/6] Waiting for processes to start (5 seconds)..."
 sleep 5
 
-# Test 4: Check if broadcaster processes are running
-echo "[4/5] Checking for active broadcaster processes..."
+# Test 5: Check if broadcaster processes are running
+echo "[5/6] Checking for active broadcaster processes..."
 if docker compose exec -T nginx-rtmp-staging ps aux | grep -q "[b]roadcaster.*$PROFILE"; then
     echo "✓ Broadcaster process found"
     docker compose exec -T nginx-rtmp-staging ps aux | grep "[b]roadcaster.*$PROFILE" | head -n3
@@ -53,11 +67,11 @@ else
     echo "⚠ Warning: Broadcaster process not found (may have already completed)"
 fi
 
-# Test 5: Publish done event (stream stop)
-echo "[5/5] Testing publish_done event..."
+# Test 6: Publish done event (stream stop)
+echo "[6/6] Testing publish_done event..."
 response=$(curl -s -X POST "$WEBHOOK_URL/api/v1/publish_done" \
-    -H "Content-Type: application/json" \
-    -d "{\"name\":\"$PROFILE\",\"app\":\"live\"}" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "name=$PROFILE&app=live" \
     -w "\n%{http_code}")
 
 http_code=$(echo "$response" | tail -n1)

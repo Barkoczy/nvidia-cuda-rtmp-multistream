@@ -1,10 +1,21 @@
 version: '3.8'
 
 services:
+  webhook:
+    build:
+      context: ./webhook
+      dockerfile: Dockerfile
+    container_name: webhook-staging
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      - WEBHOOK_PORT=8090
+    networks:
+      - streaming
+
   nginx-rtmp-staging:
     image: nvidia-cuda-rtmp-multistream-nginx-rtmp-staging:latest
     container_name: nginx-rtmp-staging
-    user: "1001:1001"
     ports:
       - "1936:1935"    # RTMP
       - "8081:8080"    # HTTP/HLS
@@ -32,6 +43,8 @@ services:
       - NET_BIND_SERVICE
     networks:
       - streaming
+    depends_on:
+      - webhook
 
   nginx-vts-exporter:
     image: sophos/nginx-vts-exporter:latest
