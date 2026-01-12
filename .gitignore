@@ -49,4 +49,4 @@ debug/
 *.key
 *.crt
 *.cer
-*.der
+*.der.env.grafana

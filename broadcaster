@@ -1,13 +1,71 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Retrieves variables if /tmp/.env exists (tmpfs location)
-if [ -f "/tmp/.env" ]; then
-    export $(grep -v '^#' /tmp/.env | xargs)
-    echo "Environment variables loaded from /tmp/.env"
-else
-    echo "Warning: /tmp/.env not found!"
-fi
+# --------------------------------------------------
+# Shared Logging Helper (logfmt format)
+# --------------------------------------------------
+
+LOG_COMPONENT="${LOG_COMPONENT:-broadcaster}"
+STOP_MODE=false
+PROFILE=""
+
+log_ts() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+# log LEVEL EVENT MESSAGE [key value]...
+log() {
+  local level="$1"; shift
+  local event="$1"; shift
+  local msg="${1:-}"; shift || true
+
+  # Context from environment
+  local profile="${PROFILE:-unknown}"
+  local target="${TARGET:-unknown}"
+  local stream_id="${STREAM_ID:-unknown}"
+
+  # Base prefix
+  printf 'ts=%s level=%s component=%s event=%s profile=%s target=%s stream_id=%s' \
+    "$(log_ts)" "$level" "$LOG_COMPONENT" "$event" "$profile" "$target" "$stream_id"
+
+  # Optional key=value pairs
+  while [ "$#" -gt 1 ]; do
+    local key="$1"; shift
+    local val="$1"; shift
+    # Quote values containing special characters (space, =, :, -, /)
+    if [[ "$val" =~ [\ =:/\-] ]]; then
+      local esc_val=${val//\"/\'}
+      printf ' %s="%s"' "$key" "$esc_val"
+    else
+      printf ' %s=%s' "$key" "$val"
+    fi
+  done
+
+  # Message at the end (quoted)
+  if [ -n "${msg}" ]; then
+    local esc_msg=${msg//\"/\'}
+    printf ' msg="%s"' "$esc_msg"
+  fi
+
+  printf '\n'
+}
+
+log_info()  { log info  "$@"; }
+log_warn()  { log warn  "$@"; }
+log_error() { log error "$@"; }
+log_debug() { log debug "$@"; }
+
+is_valid_profile_name() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{1,50}$ ]]
+}
+
+escape_sed() {
+  printf '%s' "$1" | sed -e 's/[.[\\^$*+?{}|()]/\\&/g' -e 's#/#\\/#g'
+}
+
+# --------------------------------------------------
+# Environment and Configuration
+# --------------------------------------------------
 
 # Configuration paths
 CONFIG_FILE="/etc/broadcaster/profiles.yml"
@@ -28,8 +86,6 @@ echo "Groups: $(id -G)" >> "$LOG_DIR/debug.log"
 echo "PATH: $PATH" >> "$LOG_DIR/debug.log"
 echo "Arguments: $@" >> "$LOG_DIR/debug.log"
 echo "Working directory: $(pwd)" >> "$LOG_DIR/debug.log"
-echo "Environment variables:" >> "$LOG_DIR/debug.log"
-env | grep -E '(_YOUTUBE_KEY|_TWITCH_KEY|_KICK_KEY|_X_KEY)=' | sed 's/=.*/=XXXXX/' >> "$LOG_DIR/debug.log"
 echo "File permissions:" >> "$LOG_DIR/debug.log"
 ls -la "$CONFIG_FILE" >> "$LOG_DIR/debug.log" 2>&1
 ls -la "$LOG_DIR" >> "$LOG_DIR/debug.log" 2>&1
@@ -58,6 +114,11 @@ done
 # Check if profile was provided
 if [ -z "$PROFILE" ]; then
   echo "Error: No profile specified. Use --profile PROFILE_NAME" | tee -a "$LOG_DIR/debug.log"
+  exit 1
+fi
+
+if ! is_valid_profile_name "$PROFILE"; then
+  echo "Error: Invalid profile name '$PROFILE' (allowed: A-Z a-z 0-9 _ -)" | tee -a "$LOG_DIR/debug.log"
   exit 1
 fi
 
@@ -140,6 +201,72 @@ if ! /usr/bin/yq e ".$PROFILE" "$CONFIG_FILE" | grep -q -v "null"; then
   exit 1
 fi
 
+# FFmpeg wrapper function with telemetry
+run_ffmpeg() {
+  local service_name="$1"
+  local base_url="$2"
+  local codec="$3"
+  local preset="$4"
+  local codec_profile="$5"
+  local bitrate="$6"
+  local gopsize="$7"
+  local framerate="$8"
+  local scale_filter="$9"
+  local output_url="${10}"
+
+  local start_ns end_ns duration_ms exit_code
+  local safe_url="${base_url}/REDACTED"
+  local base_url_escaped
+
+  base_url_escaped=$(escape_sed "$base_url")
+
+  # Set context for logging
+  export TARGET="${service_name}"
+  export STREAM_ID="${PROFILE}_${TARGET}_$(date -u +%Y%m%d_%H%M%S)"
+
+  # Log FFmpeg start
+  log_info ffmpeg_start "Starting FFmpeg stream" codec "$codec" preset "$preset" profile "$codec_profile" bitrate "$bitrate" framerate "$framerate" gopsize "$gopsize" input "rtmp://localhost:1935/live/$PROFILE" output "$safe_url"
+
+  # Capture start time (nanoseconds if available, fallback to seconds)
+  start_ns=$(date +%s%N 2>/dev/null || echo $(($(date +%s) * 1000000000)))
+
+  # Run FFmpeg in background with PID capture
+  (
+    /usr/bin/ffmpeg -y -loglevel error -stats -hwaccel cuda -hwaccel_device 0 \
+      -i rtmp://localhost:1935/live/$PROFILE \
+      -c:v $codec -preset $preset -profile:v $codec_profile \
+      -b:v $bitrate -maxrate $bitrate -bufsize $bitrate \
+      -g $gopsize -keyint_min $gopsize \
+      -r $framerate \
+      $scale_filter \
+      -c:a aac -ar 44100 -b:a 128k \
+      -f flv "$output_url" 2>&1 | sed -E "s#${base_url_escaped}/[^[:space:]]+#${base_url}/REDACTED#g" | tee -a "$LOG_FILE"
+
+    # Capture exit code from FFmpeg (first command in pipeline)
+    exit_code=${PIPESTATUS[0]}
+
+    # Calculate duration
+    end_ns=$(date +%s%N 2>/dev/null || echo $(($(date +%s) * 1000000000)))
+    duration_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+    # Log FFmpeg exit
+    if [ "$exit_code" -eq 0 ]; then
+      log_info ffmpeg_exit "FFmpeg finished successfully" exit_code "$exit_code" duration_ms "$duration_ms"
+    else
+      log_error ffmpeg_exit "FFmpeg exited with error" exit_code "$exit_code" duration_ms "$duration_ms"
+    fi
+
+    # Write exit code to file for monitoring
+    echo "$exit_code" > "$LOG_DIR/${PROFILE}_${service_name}.exitcode"
+  ) &
+
+  # Save process PID
+  local pid=$!
+  echo $pid > "$LOG_DIR/${PROFILE}_${service_name}.pid"
+
+  log_info stream_started "Stream process spawned" pid "$pid"
+}
+
 # Function to start FFmpeg stream for a specific service
 start_stream() {
   local service=$1
@@ -181,7 +308,7 @@ start_stream() {
   echo "  Preset: $preset" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   echo "  Profile: $profile_type" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
 
-  # Try to load key from Docker secret first, then fall back to environment variable
+  # Load key from Docker secret only (no legacy fallback)
   local secret_file="/run/secrets/${PROFILE}_${service}_key"
   local key=""
 
@@ -190,30 +317,13 @@ start_stream() {
     key=$(cat "$secret_file" | tr -d '\n\r')
     echo "Loading key from Docker secret: $secret_file" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
   else
-    # Fallback to environment variable (legacy mode)
-    local key_var=$(echo "${PROFILE}_${service}_KEY" | tr '[:lower:]' '[:upper:]')
-    echo "Docker secret not found, checking environment variable: $key_var" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    echo "Error: Secret not found for service $service ($secret_file missing)" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    return 1
+  fi
 
-    key=${!key_var}
-    if [ -z "$key" ]; then
-      echo "Error: No key found for service $service (checked $secret_file and \$${key_var})" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-
-      # Fallback to legacy fixed keys for testing
-      if [ "$service" == "youtube" ]; then
-        key=${YOUTUBE_KEY:-""}
-      elif [ "$service" == "twitch" ]; then
-        key=${TWITCH_KEY:-""}
-      elif [ "$service" == "kick" ]; then
-        key=${KICK_KEY:-""}
-      fi
-
-      if [ -z "$key" ]; then
-        echo "No fallback key found, skipping service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-        return 1
-      else
-        echo "Using legacy fallback key for service $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-      fi
-    fi
+  if [ -z "$key" ]; then
+    echo "Error: Secret file is empty for service $service ($secret_file)" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+    return 1
   fi
 
   # Check for required values
@@ -240,35 +350,11 @@ start_stream() {
     output_url="${url}/${key}"
   fi
 
-  echo "Starting stream for service: $service" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-  echo "Parameters: codec=$codec, profile=$codec_profile, bitrate=$bitrate, fps=$framerate" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-  if [ ! -z "$scale_filter" ]; then
-    echo "Using scale filter: $scale_filter" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-  fi
+  # Log service start with new logging format
+  log_info service_config "Configuring stream for service" codec "$codec" profile "$codec_profile" bitrate "$bitrate" framerate "$framerate" gopsize "$gopsize" preset "$preset" scale "$scale_filter"
 
-  # Launch FFmpeg with appropriate configuration and redirect logs
-  (
-    # Create a safe URL for logging by hiding the key
-    safe_url="${url}/XXXXXX" # Hide the key in logs
-    echo "Starting stream for service $service to $safe_url" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-
-    # Using -loglevel warning to reduce log volume
-    /usr/bin/ffmpeg -y -loglevel warning -hwaccel cuda -hwaccel_device 0 -i rtmp://localhost:1935/live/$PROFILE \
-      -c:v $codec -preset $preset -profile:v $codec_profile \
-      -b:v $bitrate -maxrate $bitrate -bufsize $bitrate \
-      -g $gopsize -keyint_min $gopsize \
-      -r $framerate \
-      $scale_filter \
-      -c:a aac -ar 44100 -b:a 128k \
-      -f flv $output_url >> "$LOG_FILE" 2>&1 &
-
-    # Save process PID
-    pid=$!
-    echo $pid > "$LOG_DIR/${PROFILE}_${service}.pid"
-    echo "Stream started with PID: $pid" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
-  )
-
-  echo "Stream for service $service started (PID: $(cat "$LOG_DIR/${PROFILE}_${service}.pid"))" | tee -a "$LOG_FILE" "$LOG_DIR/debug.log"
+  # Launch FFmpeg using wrapper with telemetry
+  run_ffmpeg "$service" "$url" "$codec" "$preset" "$codec_profile" "$bitrate" "$gopsize" "$framerate" "$scale_filter" "$output_url"
 }
 
 # Start streams for all configured services

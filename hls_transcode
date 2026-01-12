@@ -1,7 +1,83 @@
 #!/bin/bash
+set -euo pipefail
 
-name=$1
-action=$2
+# --------------------------------------------------
+# Shared Logging Helper (logfmt format)
+# --------------------------------------------------
+
+LOG_COMPONENT="hls_transcode"
+
+log_ts() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+# log LEVEL EVENT MESSAGE [key value]...
+log() {
+  local level="$1"; shift
+  local event="$1"; shift
+  local msg="${1:-}"; shift || true
+
+  # Context from environment
+  local profile="${PROFILE:-unknown}"
+  local target="${TARGET:-unknown}"
+  local stream_id="${STREAM_ID:-unknown}"
+
+  # Base prefix
+  printf 'ts=%s level=%s component=%s event=%s profile=%s target=%s stream_id=%s' \
+    "$(log_ts)" "$level" "$LOG_COMPONENT" "$event" "$profile" "$target" "$stream_id"
+
+  # Optional key=value pairs
+  while [ "$#" -gt 1 ]; do
+    local key="$1"; shift
+    local val="$1"; shift
+    # Quote values containing special characters (space, =, :, -, /)
+    if [[ "$val" =~ [\ =:/\-] ]]; then
+      local esc_val=${val//\"/\'}
+      printf ' %s="%s"' "$key" "$esc_val"
+    else
+      printf ' %s=%s' "$key" "$val"
+    fi
+  done
+
+  # Message at the end (quoted)
+  if [ -n "${msg}" ]; then
+    local esc_msg=${msg//\"/\'}
+    printf ' msg="%s"' "$esc_msg"
+  fi
+
+  printf '\n'
+}
+
+log_info()  { log info  "$@"; }
+log_warn()  { log warn  "$@"; }
+log_error() { log error "$@"; }
+log_debug() { log debug "$@"; }
+
+is_valid_profile_name() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{1,50}$ ]]
+}
+
+# --------------------------------------------------
+# HLS Transcode Configuration
+# --------------------------------------------------
+
+name=${1:-}
+action=${2:-}
+
+if [ -z "$name" ]; then
+  echo "Error: No profile name provided"
+  exit 1
+fi
+
+if ! is_valid_profile_name "$name"; then
+  echo "Error: Invalid profile name '$name' (allowed: A-Z a-z 0-9 _ -)"
+  exit 1
+fi
+
+# Set context for logging
+export PROFILE="${name}"
+export TARGET="hls"
+export STREAM_ID="${PROFILE}_${TARGET}_$(date -u +%Y%m%d_%H%M%S)"
 
 # Function for file cleanup and process termination
 cleanup() {
@@ -39,39 +115,74 @@ if [ "$action" = "stop" ]; then
     exit 0
 fi
 
+# FFmpeg wrapper function with telemetry for HLS
+run_ffmpeg_hls() {
+  local start_ns end_ns duration_ms exit_code
+
+  log_info ffmpeg_start "Starting FFmpeg HLS transcode" variants "1080p,720p,480p" bitrates "8000k,3000k,1500k" input "rtmp://localhost:1935/live/${name}" output "/tmp/hls/${name}.m3u8"
+
+  # Capture start time
+  start_ns=$(date +%s%N 2>/dev/null || echo $(($(date +%s) * 1000000000)))
+
+  # Run FFmpeg in background
+  (
+    /usr/bin/ffmpeg -y -loglevel error -stats -hwaccel cuda -hwaccel_output_format cuda \
+      -i rtmp://localhost:1935/live/${name} \
+      -c:v h264_nvenc -preset p1 -tune ll -rc cbr -bf 0 -threads 8 \
+      -b:v:0 8000k -maxrate:v:0 8000k -bufsize:v:0 8000k \
+      -b:v:1 3000k -maxrate:v:1 3000k -bufsize:v:1 3000k \
+      -b:v:2 1500k -maxrate:v:2 1500k -bufsize:v:2 1500k \
+      -filter_complex "[0:v]split=3[v1][v2][v3];[v1]scale_cuda=1920:1080[high];[v2]scale_cuda=1280:720[medium];[v3]scale_cuda=854:480[low]" \
+      -map "[high]" -map "[medium]" -map "[low]" -map 0:a? \
+      -g 60 -keyint_min 60 -forced-idr 1 -spatial-aq 1 -zerolatency 1 \
+      -c:a aac -ar 48000 -b:a 128k \
+      -f hls \
+      -hls_time 4 \
+      -hls_list_size 12 \
+      -hls_delete_threshold 3 \
+      -hls_flags delete_segments+independent_segments \
+      -hls_segment_type fmp4 \
+      -hls_fmp4_init_filename init_${name}_%v.mp4 \
+      -init_seg_name init_${name}_%v.mp4 \
+      -master_pl_name ${name}.m3u8 \
+      -hls_segment_filename /tmp/hls/${name}_%v_%03d.m4s \
+      -var_stream_map "v:0,name:high v:1,name:medium v:2,name:low a:0,agroup:audio" \
+      -max_muxing_queue_size 2048 \
+      -reset_timestamps 1 \
+      -fflags +genpts \
+      -avoid_negative_ts make_zero \
+      -movflags +faststart+frag_keyframe \
+      -muxdelay 0 -muxpreload 0 \
+      /tmp/hls/${name}_%v.m3u8 2>&1 | tee -a /var/log/broadcaster/hls_${name}.log
+
+    # Capture exit code
+    exit_code=${PIPESTATUS[0]}
+
+    # Calculate duration
+    end_ns=$(date +%s%N 2>/dev/null || echo $(($(date +%s) * 1000000000)))
+    duration_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+    # Log FFmpeg exit
+    if [ "$exit_code" -eq 0 ]; then
+      log_info ffmpeg_exit "FFmpeg HLS finished successfully" exit_code "$exit_code" duration_ms "$duration_ms"
+    else
+      log_error ffmpeg_exit "FFmpeg HLS exited with error" exit_code "$exit_code" duration_ms "$duration_ms"
+    fi
+
+    # Write exit code to file for monitoring
+    echo "$exit_code" > "/tmp/hls_pid/${name}.exitcode"
+  ) &
+
+  # Save PID to file
+  local pid=$!
+  echo $pid > "/tmp/hls_pid/$name.pid"
+
+  log_info stream_started "HLS stream process spawned" pid "$pid"
+}
+
 # Action start (or no action) - start FFmpeg
 # First terminate any existing process
 cleanup "$name"
 
-# Run the FFmpeg process in the background
-/usr/bin/ffmpeg -y -loglevel warning -hwaccel cuda -hwaccel_output_format cuda -i rtmp://localhost:1935/live/${name} \
-  -c:v h264_nvenc -preset p1 -tune ll -rc cbr -bf 0 -threads 8 \
-  -b:v:0 8000k -maxrate:v:0 8000k -bufsize:v:0 8000k \
-  -b:v:1 3000k -maxrate:v:1 3000k -bufsize:v:1 3000k \
-  -b:v:2 1500k -maxrate:v:2 1500k -bufsize:v:2 1500k \
-  -filter_complex "[0:v]split=3[v1][v2][v3];[v1]scale_cuda=1920:1080[high];[v2]scale_cuda=1280:720[medium];[v3]scale_cuda=854:480[low]" \
-  -map "[high]" -map "[medium]" -map "[low]" -map 0:a \
-  -g 60 -keyint_min 60 -forced-idr 1 -spatial-aq 1 -zerolatency 1 \
-  -c:a aac -ar 48000 -b:a 128k \
-  -f hls \
-  -hls_time 4 \
-  -hls_list_size 12 \
-  -hls_delete_threshold 3 \
-  -hls_flags delete_segments+independent_segments \
-  -hls_segment_type fmp4 \
-  -hls_fmp4_init_filename init_${name}_%v.mp4 \
-  -init_seg_name init_${name}_%v.mp4 \
-  -master_pl_name ${name}.m3u8 \
-  -hls_segment_filename /tmp/hls/${name}_%v_%03d.m4s \
-  -var_stream_map "v:0,name:high v:1,name:medium v:2,name:low a:0,agroup:audio" \
-  -max_muxing_queue_size 2048 \
-  -reset_timestamps 1 \
-  -fflags +genpts \
-  -avoid_negative_ts make_zero \
-  -movflags +faststart+frag_keyframe \
-  -muxdelay 0 -muxpreload 0 \
-  /tmp/hls/${name}_%v.m3u8 > /dev/null 2>&1 &
-
-# Save PID to file
-echo $! > "/tmp/hls_pid/$name.pid"
-echo "Started FFmpeg for stream $name (PID: $!)"
+# Run FFmpeg with telemetry wrapper
+run_ffmpeg_hls

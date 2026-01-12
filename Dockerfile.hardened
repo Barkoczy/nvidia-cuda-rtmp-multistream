@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y \
     libxcb1-dev \
     libxcb-shm0-dev \
     libxcb-xfixes0-dev \
+    libxv1 \
     texinfo \
     zlib1g-dev \
     cuda-nvcc-12-8 \
@@ -120,6 +121,9 @@ RUN ./configure \
     && make -j$(nproc) \
     && make install
 
+# Download stat.xsl for RTMP statistics
+RUN wget -O /tmp/stat.xsl https://raw.githubusercontent.com/arut/nginx-rtmp-module/master/stat.xsl
+
 # Install yq for YAML parsing
 FROM nvidia-base AS yq-installer
 
@@ -142,9 +146,12 @@ RUN apt-get update && apt-get install -y \
     libtheora0 \
     libvorbis0a \
     libva2 \
+    libva-drm2 \
+    libva-x11-2 \
     libvdpau1 \
     libssl3 \
     ca-certificates \
+    curl \
     logrotate \
     cron \
     procps \
@@ -152,6 +159,7 @@ RUN apt-get update && apt-get install -y \
     libxcb-shm0 \
     libxcb-xfixes0 \
     libxcb-shape0 \
+    libxv1 \
     libasound2t64 \
     libsdl2-2.0-0 \
     libsndio7.0 \
@@ -208,10 +216,8 @@ RUN chmod 755 /usr/local/bin/broadcaster \
     chmod 644 /etc/broadcaster/profiles.yml
 
 # Create stat.xsl for NGINX RTMP stats
-# Note: wget is not available in runtime image, install it first
-RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /var/www/html && \
-    wget -O /var/www/html/stat.xsl https://raw.githubusercontent.com/arut/nginx-rtmp-module/master/stat.xsl
+RUN mkdir -p /var/www/html
+COPY --from=nginx-builder /tmp/stat.xsl /var/www/html/stat.xsl
 
 # Setting LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"

@@ -18,8 +18,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o webhook .
 # Final stage - minimal runtime image
 FROM alpine:3.19
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates and wget for health checks
+RUN apk --no-cache add ca-certificates wget
 
 WORKDIR /app
 

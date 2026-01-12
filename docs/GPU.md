@@ -2,9 +2,9 @@
 
 ## Server Information
 - **Hostname**: ubuntu
-- **Kernel Version**: 6.8.0-86-generic
+- **Kernel Version**: 6.8.0-87-generic
 - **Platform**: Linux x86_64
-- **Report Date**: 2025-11-16
+- **Report Date**: 2025-12-24
 
 ## GPU Hardware Details
 
@@ -47,10 +47,10 @@
 ## Driver Information
 
 ### NVIDIA Driver
-- **Driver Version**: 535.274.02
-- **Driver Release Date**: Thu Sep 4 22:13:52 UTC 2025
+- **Driver Version**: 580.95.05
+- **Driver Release Date**: N/A (not reported by modinfo)
 - **Architecture**: UNIX x86_64 Kernel Module
-- **Kernel Module Location**: `/lib/modules/6.8.0-86-generic/kernel/nvidia-535srv/nvidia.ko`
+- **Kernel Module Location**: `/lib/modules/6.8.0-87-generic/updates/dkms/nvidia.ko.zst`
 - **Kernel Driver In Use**: nvidia
 
 ### Available Kernel Modules
@@ -123,7 +123,7 @@ pci:v000010DEd00001C03sv00001462sd00003281bc03sc00i00
 
 ## Notes
 
-- **nvidia-smi**: Not available in current environment (command not found)
+- **nvidia-smi**: Available and functional
 - **Driver Status**: NVIDIA proprietary driver successfully loaded
 - **IOMMU**: GPU is in IOMMU group 14 (suitable for GPU passthrough)
 - **Device Access**: All required device nodes are present

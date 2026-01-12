@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     libtheora-dev \
     libtool \
     libva-dev \
+    libva-x11-2 \
     libvdpau-dev \
     libvorbis-dev \
     libxcb1-dev \
@@ -63,7 +64,7 @@ RUN wget https://github.com/FFmpeg/nv-codec-headers/releases/download/n13.0.19.0
 
 # Build FFmpeg with NVIDIA support
 WORKDIR /tmp/ffmpeg
-RUN git clone https://git.ffmpeg.org/ffmpeg.git . \
+RUN git clone --depth 1 --branch release/7.1 https://github.com/FFmpeg/FFmpeg.git . \
     && ./configure \
         --prefix=/usr \
         --enable-nonfree \
@@ -100,6 +101,7 @@ RUN wget https://nginx.org/download/nginx-1.26.1.tar.gz && \
     tar zxf nginx-1.26.1.tar.gz && \
     wget https://github.com/arut/nginx-rtmp-module/archive/master.zip && \
     unzip master.zip && \
+    git clone https://github.com/vozlt/nginx-module-vts.git && \
     cd nginx-1.26.1 && \
     ./configure \
         --prefix=/usr/local/nginx \
@@ -107,7 +109,8 @@ RUN wget https://nginx.org/download/nginx-1.26.1.tar.gz && \
         --with-http_v2_module \
         --with-http_stub_status_module \
         --with-http_realip_module \
-        --add-module=../nginx-rtmp-module-master && \
+        --add-module=../nginx-rtmp-module-master \
+        --add-module=../nginx-module-vts && \
     make -j$(nproc) && \
     make install
 

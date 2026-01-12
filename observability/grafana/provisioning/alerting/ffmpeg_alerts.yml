@@ -1,0 +1,457 @@
+# FFmpeg Telemetry Alert Rules
+# Grafana Unified Alerting Provisioning
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: FFmpeg Stream Alerts
+    folder: RTMP Streaming
+    interval: 1m
+    rules:
+      # Alert 1: FFmpeg Exit Code != 0 (Critical)
+      - uid: ffmpeg-exit-nonzero
+        title: FFmpeg Exit Code Non-Zero
+        condition: C
+        data:
+          # A: Query Loki for non-zero exit codes
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                sum by (profile, target) (
+                  count_over_time({job="broadcaster", event="ffmpeg_exit"} | logfmt | exit_code != "0" [10m])
+                )
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          # B: Reduce to single value per series
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: A
+              refId: B
+          # C: Threshold - fire if > 0
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "FFmpeg stream failed with non-zero exit code"
+          description: "Profile: {{ $labels.profile }}, Target: {{ $labels.target }} - FFmpeg exited with error code in the last 10 minutes"
+          dashboard_url: "/d/ffmpeg-telemetry/ffmpeg-telemetry?var-profile={{ $labels.profile }}&var-target={{ $labels.target }}"
+          runbook_url: "docs/runbooks/ffmpeg_exit_nonzero.md"
+        labels:
+          severity: critical
+          component: broadcaster
+          alert_type: ffmpeg_failure
+        isPaused: false
+
+      # Alert 2: Error Burst - 3+ errors in 10 minutes (Warning)
+      - uid: ffmpeg-error-burst-warning
+        title: FFmpeg Error Burst (Warning)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                sum by (profile, target) (
+                  count_over_time({job="broadcaster", level="error"} [10m])
+                )
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: A
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 2
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Multiple FFmpeg errors detected"
+          description: "Profile: {{ $labels.profile }}, Target: {{ $labels.target }} - 3+ errors in the last 10 minutes"
+          dashboard_url: "/d/ffmpeg-telemetry/ffmpeg-telemetry?var-profile={{ $labels.profile }}&var-target={{ $labels.target }}"
+        labels:
+          severity: warning
+          component: broadcaster
+          alert_type: error_burst
+        isPaused: false
+
+      # Alert 3: Error Burst - 10+ errors in 10 minutes (Critical)
+      - uid: ffmpeg-error-burst-critical
+        title: FFmpeg Error Burst (Critical)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                sum by (profile, target) (
+                  count_over_time({job="broadcaster", level="error"} [10m])
+                )
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: A
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gte
+                    params:
+                      - 10
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Critical: High error rate in FFmpeg streams"
+          description: "Profile: {{ $labels.profile }}, Target: {{ $labels.target }} - 10+ errors in the last 10 minutes"
+          dashboard_url: "/d/ffmpeg-telemetry/ffmpeg-telemetry?var-profile={{ $labels.profile }}&var-target={{ $labels.target }}"
+        labels:
+          severity: critical
+          component: broadcaster
+          alert_type: error_burst
+        isPaused: false
+
+      # Alert 4: Restart Loop Detection (5+ starts with avg duration < 60s)
+      - uid: ffmpeg-restart-loop
+        title: FFmpeg Restart Loop Detected
+        condition: E
+        data:
+          # A: Count of starts in 10m
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                sum by (profile, target) (
+                  count_over_time({job="broadcaster", event="ffmpeg_start"} [10m])
+                )
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          # B: Average duration in 10m
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                avg by (profile, target) (
+                  avg_over_time({job="broadcaster", event="ffmpeg_exit"} | logfmt | unwrap duration_ms [10m])
+                )
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          # C: Reduce A
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: A
+              refId: C
+          # D: Reduce B
+          - refId: D
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: B
+              refId: D
+          # E: Math expression - starts >= 5 AND avg_duration < 60000ms
+          - refId: E
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: math
+              expression: "$C >= 5 && $D < 60000"
+              refId: E
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "FFmpeg restart loop detected"
+          description: "Profile: {{ $labels.profile }}, Target: {{ $labels.target }} - Multiple restarts with short duration detected (possible bad stream key or platform block)"
+          dashboard_url: "/d/ffmpeg-telemetry/ffmpeg-telemetry?var-profile={{ $labels.profile }}&var-target={{ $labels.target }}"
+          runbook_url: "docs/runbooks/ffmpeg_restart_loop.md"
+        labels:
+          severity: critical
+          component: broadcaster
+          alert_type: restart_loop
+        isPaused: false
+
+      # Alert 5: Short Stream Duration SLO (median < 5 minutes)
+      - uid: ffmpeg-short-duration-slo
+        title: Stream Duration SLO Violation
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                quantile_over_time(0.5,
+                  {job="broadcaster", event="ffmpeg_exit"} | logfmt | unwrap duration_ms [30m]
+                )
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: A
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params:
+                      - 300000
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Stream duration SLO violation"
+          description: "Median stream duration in the last 30 minutes is below 5 minutes threshold"
+          dashboard_url: "/d/ffmpeg-telemetry/ffmpeg-telemetry"
+        labels:
+          severity: warning
+          component: broadcaster
+          alert_type: slo_violation
+        isPaused: false
+
+      # Alert 6: No Streams Started (30 minutes silence)
+      - uid: ffmpeg-no-streams
+        title: No Streams Started
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                sum(
+                  count_over_time({job="broadcaster", event="ffmpeg_start"} [30m])
+                ) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: A
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params:
+                      - 1
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+              refId: C
+        noDataState: Alerting
+        execErrState: Error
+        for: 30m
+        annotations:
+          summary: "No streams started in 30 minutes"
+          description: "No FFmpeg streams have been started in the last 30 minutes - possible system issue"
+          dashboard_url: "/d/ffmpeg-telemetry/ffmpeg-telemetry"
+        labels:
+          severity: warning
+          component: broadcaster
+          alert_type: no_activity
+        isPaused: true  # Disabled by default - enable if continuous streaming expected
+
+      # Alert 7: HLS Transcode Exit Non-Zero
+      - uid: hls-exit-nonzero
+        title: HLS Transcode Exit Non-Zero
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                sum by (profile) (
+                  count_over_time({job="broadcaster", component="hls_transcode", event="ffmpeg_exit"} | logfmt | exit_code != "0" [10m])
+                )
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: A
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+                  reducer:
+                    type: last
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "HLS transcode failed"
+          description: "Profile: {{ $labels.profile }} - HLS transcode process exited with non-zero code"
+          dashboard_url: "/d/ffmpeg-telemetry/ffmpeg-telemetry?var-profile={{ $labels.profile }}"
+        labels:
+          severity: critical
+          component: hls_transcode
+          alert_type: ffmpeg_failure
+        isPaused: false
+
+# Contact points and notification policies would be configured separately
+# or via additional provisioning files

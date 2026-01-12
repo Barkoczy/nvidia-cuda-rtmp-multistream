@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Docker-based NGINX RTMP server that restreams to multiple platforms simultaneously (YouTube, Twitch, Kick, X/Twitter) using NVIDIA GPU hardware acceleration (NVENC). The system uses a profile-based configuration where each profile can broadcast to multiple services with different encoding settings.
 
-**Current Branch**: `feature/phase1-security`
-**Status**: Phase 1 security hardening complete, Phase 2 observability stack implemented
+**Current Branch**: `feature/phase3-ffmpeg-metrics`
+**Status**: ✅ Phase 1 security COMPLETE, ✅ Phase 2 observability COMPLETE, 🚧 Phase 3 FFmpeg telemetry IN PROGRESS
 
 ## Architecture
 
@@ -16,10 +16,10 @@ This is a Docker-based NGINX RTMP server that restreams to multiple platforms si
 1. **NGINX RTMP Server** (nginx.conf:10-35)
    - Listens on port 1935 for incoming RTMP streams
    - Application endpoint: `rtmp://localhost:1935/live/PROFILE_NAME`
-   - **Staging**: Uses port 1936 and calls webhook instead of direct exec
+   - **Staging**: Uses port 1936 and webhook authorization (same flow as production)
    - Triggers two mechanisms when a stream starts:
-     - **Production**: `exec_publish` - Directly executes scripts (legacy)
-     - **Staging**: `on_publish` webhook - HTTP POST to webhook service (secure)
+     - **Webhook authorization**: `on_publish` - HTTP POST to webhook service (secure)
+     - **Process start**: `exec_publish` - Executes scripts after webhook approval
    - Scripts/endpoints triggered:
      - `hls_transcode`: Creates HLS adaptive bitrate streams for playback
      - `broadcaster`: Spawns FFmpeg processes to restream to configured platforms
@@ -39,7 +39,7 @@ This is a Docker-based NGINX RTMP server that restreams to multiple platforms si
    - Reads `profiles.yml` using `yq` to get service configurations
    - **Secret Loading** (Phase 1):
      - Primary: Reads from Docker secrets at `/run/secrets/{profile}_{service}_key`
-     - Fallback: Environment variables `PROFILENAME_SERVICENAME_KEY` (legacy)
+     - Secrets-only runtime (no environment-variable fallback)
    - Spawns separate FFmpeg process for each configured service
    - Process management via PID files in `/var/log/broadcaster/`
    - Automatically stops existing streams before starting new ones
@@ -50,14 +50,21 @@ This is a Docker-based NGINX RTMP server that restreams to multiple platforms si
    - Outputs to `/tmp/hls/` directory
    - Accessible via HTTP at `http://localhost:8080/hls/PROFILE_NAME.m3u8`
 
-5. **Observability Stack** - **NEW in Phase 2**
+5. **Observability Stack** (Phase 2)
    - **Prometheus**: Metrics collection (port 9090)
    - **Grafana**: Dashboards and visualization (port 3000)
    - **Loki**: Log aggregation (port 3100)
-   - **Promtail**: Log collection agent
+   - **Promtail**: Log collection agent with logfmt parsing
    - **DCGM Exporter**: NVIDIA GPU metrics (port 9400)
    - **Node Exporter**: Host metrics (port 9100)
    - **cAdvisor**: Container metrics (port 8082)
+
+6. **FFmpeg Telemetry** (Phase 3) - **IN PROGRESS**
+   - Structured logging (logfmt format) in `broadcaster` and `hls_transcode`
+   - Fields: `ts`, `level`, `component`, `event`, `profile`, `target`, `stream_id`, `exit_code`, `duration_ms`
+   - Loki parsing via Promtail pipeline stages
+   - Grafana dashboard: `ffmpeg_telemetry.json`
+   - Alert rules: `observability/grafana/provisioning/alerting/ffmpeg_alerts.yml`
 
 ### Key File Flow
 
@@ -76,17 +83,13 @@ RTMP Stream → NGINX (port 1936) → Webhook HTTP POST → Webhook validates �
   - Each profile (e.g., "gaming", "events") contains service configurations
   - Service settings: url, bitrate, framerate, gopSize, preset, profile, scale
 
-- **Docker Secrets** (Phase 1 - Preferred):
+- **Docker Secrets** (Phase 1 - Required):
   - Stored in `/run/secrets/` as read-only files
   - Naming convention: `{profile}_{service}_key` (lowercase, e.g., `gaming_youtube_key`)
   - Permissions: 600 (owner read-only)
   - Not visible in `docker inspect` or process environment
 
-- **Environment Variables** (Legacy fallback):
-  - Format: `PROFILENAME_SERVICENAME_KEY` (all uppercase)
-  - Example: `GAMING_YOUTUBE_KEY`, `GAMING_TWITCH_KEY`
-  - Exported to `/etc/broadcaster/.env` on container startup
-  - Use `./init_secrets.sh` to migrate to Docker secrets
+> Runtime no longer supports environment-variable stream keys. Use `./init_secrets.sh` only as a one-time migration helper.
 
 ### NVIDIA GPU Integration
 
@@ -105,7 +108,7 @@ RTMP Stream → NGINX (port 1936) → Webhook HTTP POST → Webhook validates �
 ### Security Features (Phase 1)
 
 - **Read-only root filesystem**: Container uses `read_only: true` with tmpfs for writable paths
-- **Non-root execution**: Runs as `broadcaster` user (UID 1000)
+- **Non-root execution**: NGINX worker processes run as `broadcaster` (UID 1001); master process runs as root for setup
 - **Minimal capabilities**: Only 5 Linux capabilities (CHOWN, DAC_OVERRIDE, SETGID, SETUID, NET_BIND_SERVICE)
 - **no-new-privileges**: Prevents privilege escalation
 - **Docker secrets**: Stream keys never exposed in environment or logs
@@ -195,6 +198,20 @@ curl http://localhost:3100/loki/api/v1/query
 curl -G http://localhost:3100/loki/api/v1/query \
   --data-urlencode 'query={job="broadcaster", profile="gaming"}'
 
+# === FFmpeg Telemetry (Phase 3) ===
+
+# FFmpeg stream starts in last 10 minutes
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query={job="broadcaster", event="ffmpeg_start"}'
+
+# FFmpeg exit codes (errors)
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query={job="broadcaster", event="ffmpeg_exit"} | logfmt | exit_code != "0"'
+
+# Stream duration analysis
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query=avg_over_time({job="broadcaster", event="ffmpeg_exit"} | logfmt | unwrap duration_ms [1h])'
+
 # === Operational Scripts (Phase 2) ===
 
 # Daily health check
@@ -234,9 +251,6 @@ docker compose exec nginx-rtmp nvidia-smi
 
 # Verify Docker secrets are mounted
 docker compose exec nginx-rtmp ls -la /run/secrets/
-
-# Verify environment variables are loaded (legacy)
-docker compose exec nginx-rtmp cat /etc/broadcaster/.env
 
 # Test yq and profile parsing
 docker compose exec nginx-rtmp yq e '.gaming' /etc/broadcaster/profiles.yml
@@ -279,8 +293,8 @@ docker compose exec nginx-rtmp pkill -9 ffmpeg
 
 **Production** (`docker-compose.yml`):
 - Ports: 1935 (RTMP), 8080 (HTTP)
-- Uses `exec_publish` (legacy, vulnerable to command injection)
-- Direct script execution
+- Uses webhook authorization (`on_publish`) before process start
+- Direct script execution without shell wrapper
 
 **Staging** (`docker-compose.staging.yml`):
 - Ports: 1936 (RTMP), 8081 (HTTP), 8090 (Webhook)
@@ -306,13 +320,12 @@ When adding new platforms or modifying encoding parameters in profiles.yml:
 
 - **broadcaster**: Bash script with yq-based YAML parsing. Modifying requires understanding:
   - PID file management (broadcaster:74-118)
-  - Docker secrets fallback logic (broadcaster:184-217)
+  - Docker secrets loading (broadcaster)
   - FFmpeg parameter construction (broadcaster:249-269)
 
 - **hls_transcode**: Fixed 3-tier ABR configuration. Changes require understanding fMP4 HLS segmentation.
 
-- **nginx.conf**: RTMP and HTTP server config. Changes to `exec_publish` directives affect stream lifecycle.
-  - **Staging**: Use `on_publish` webhook instead of `exec_publish`
+- **nginx.conf**: RTMP and HTTP server config. Changes to `on_publish`/`exec_publish` directives affect stream lifecycle.
 
 - **webhook/main.go**: Webhook server for secure stream control. Modify to add:
   - Additional validation rules
@@ -330,8 +343,8 @@ When adding new platforms or modifying encoding parameters in profiles.yml:
 
 ### Container User Permissions
 
-- Container runs NGINX as user `broadcaster` (created in Dockerfile:138)
-- **Staging**: Runs as UID 1000 for security
+- Container runs NGINX workers as user `broadcaster` (created in Dockerfile.hardened)
+- **Staging/Production**: UID 1001 for security and consistency
 - All scripts, logs, and config files owned by `broadcaster:broadcaster`
 - Permissions set in Dockerfile:142-150 and entrypoint.sh:67-83
 - If adding new directories/files, ensure proper ownership for `broadcaster` user
@@ -344,6 +357,26 @@ When adding new platforms or modifying encoding parameters in profiles.yml:
 - Cron job runs at midnight (entrypoint.sh:86)
 - Old logs auto-deleted by broadcaster script (broadcaster:17)
 - **Loki**: 7-day retention for aggregated logs
+
+### FFmpeg Telemetry Logging (Phase 3)
+
+Scripts use **logfmt** format (key=value pairs) for structured logging:
+
+```text
+ts=2025-11-16T17:00:00Z level=info component=broadcaster event=ffmpeg_start profile=gaming target=youtube stream_id=gaming_youtube_20251116_170000 codec=hevc_nvenc preset=p4 bitrate=12000k
+ts=2025-11-16T17:02:34Z level=info component=broadcaster event=ffmpeg_exit profile=gaming target=youtube stream_id=gaming_youtube_20251116_170000 exit_code=0 duration_ms=154321 msg="FFmpeg finished successfully"
+```
+
+**Key Events**:
+- `ffmpeg_start`: Stream process started (includes codec, preset, bitrate, framerate)
+- `ffmpeg_exit`: Stream process ended (includes exit_code, duration_ms)
+- `stream_started`: Background process spawned (includes pid)
+- `service_config`: Service configuration loaded
+
+**Logging Helper** (broadcaster:5-55, hls_transcode:4-55):
+- `log_info EVENT MESSAGE [key value]...`
+- `log_error EVENT MESSAGE [key value]...`
+- Context from environment: `PROFILE`, `TARGET`, `STREAM_ID`
 
 ### Security Best Practices
 
@@ -378,13 +411,13 @@ docker compose -f docker-compose.staging.yml up -d
 - **Dockerfile.hardened**: Security-hardened multi-stage build (Phase 1)
 - **docker-compose.yml**: Production service definition with GPU reservation and port mappings
 - **docker-compose.staging.yml**: Staging environment with security hardening and observability
-- **entrypoint.sh**: Container initialization, GPU detection, symlink creation, env export
+- **entrypoint.sh**: Container initialization, GPU detection, NVENC smoke test
 - **nginx.conf**: RTMP server config and HTTP endpoints for stats/HLS/logs
 - **nginx.staging.conf**: Staging NGINX config with webhook integration
 - **broadcaster**: Main restreaming orchestrator (profile → FFmpeg processes)
 - **hls_transcode**: ABR HLS stream generator for web playback
 - **profiles.yml**: Streaming profile and service configuration
-- **.env**: Streaming keys storage (not committed to git) - legacy
+- **.env**: Optional one-time input for init_secrets.sh (not used at runtime)
 
 **Security (Phase 1)**:
 - **webhook/main.go**: Go webhook server for secure stream control
@@ -397,7 +430,7 @@ docker compose -f docker-compose.staging.yml up -d
 **Observability (Phase 2)**:
 - **observability/prometheus.yml**: Prometheus configuration
 - **observability/loki-config.yml**: Loki configuration
-- **observability/promtail-config.yml**: Promtail configuration
+- **observability/promtail-config.yml**: Promtail configuration with logfmt parsing for FFmpeg telemetry
 - **observability/alerts/**: Alert rules for GPU and streams
 - **observability/grafana/**: Dashboard provisioning and datasources
 - **scripts/observability/**: Operational scripts for monitoring and maintenance
@@ -407,6 +440,12 @@ docker compose -f docker-compose.staging.yml up -d
   - **query_library.sh**: PromQL/LogQL query library
   - **backup.sh**: Backup and recovery automation
   - **upgrade.sh**: Stack upgrade helper
+
+**FFmpeg Telemetry (Phase 3)**:
+- **observability/grafana/dashboards/ffmpeg_telemetry.json**: FFmpeg stream telemetry dashboard
+- **observability/grafana/provisioning/alerting/ffmpeg_alerts.yml**: FFmpeg alert rules (exit codes, error bursts, restart loops)
+- **broadcaster**: Contains logfmt logging helper (lines 5-55) and run_ffmpeg wrapper
+- **hls_transcode**: Contains logfmt logging helper and run_ffmpeg_hls wrapper
 
 **Documentation**:
 - **README.md**: User-facing documentation
@@ -428,8 +467,7 @@ docker compose exec nginx-rtmp ls -la /run/secrets/
 # Check broadcaster is reading secrets
 docker compose exec nginx-rtmp grep "Loading key from Docker secret" /var/log/broadcaster/debug.log
 
-# Fallback to environment variables
-docker compose exec nginx-rtmp cat /etc/broadcaster/.env
+# Runtime uses Docker secrets only; no environment-variable fallback
 ```
 
 ### Webhook Not Responding (Staging)
@@ -469,6 +507,23 @@ docker compose exec dcgm-exporter-staging nvidia-smi
 curl http://localhost:9400/metrics | grep DCGM
 ```
 
+### FFmpeg Telemetry Not Appearing in Loki
+
+```bash
+# Check logfmt format in broadcaster logs
+docker compose exec nginx-rtmp tail -20 /var/log/broadcaster/gaming.log | grep "^ts="
+
+# Verify Promtail is scraping logs
+docker compose logs promtail | grep broadcaster
+
+# Test Loki query directly
+curl -G http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query={job="broadcaster"} | logfmt'
+
+# Check labels are being extracted
+curl -G http://localhost:3100/loki/api/v1/labels
+```
+
 ## Performance Baselines
 
 See `.changelogs/20251116/baseline_measurements.md` for performance metrics before and after Phase 1/2 implementations.
@@ -481,11 +536,12 @@ See `.changelogs/20251116/baseline_measurements.md` for performance metrics befo
 ## Git Workflow
 
 ```bash
-# Current work branch
-git checkout feature/phase1-security
+# Current work branch (Phase 3 FFmpeg telemetry)
+git checkout feature/phase3-ffmpeg-metrics
 
-# View Phase 1 commits
-git log --oneline feature/phase1-security
+# Previous phase branches
+git checkout feature/phase2-nginx-metrics
+git checkout feature/phase1-security
 
 # Main branch for PRs
 git checkout main

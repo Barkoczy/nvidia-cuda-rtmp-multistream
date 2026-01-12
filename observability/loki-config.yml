@@ -37,6 +37,14 @@ limits_config:
   ingestion_burst_size_mb: 32
   max_streams_per_user: 10000
   max_global_streams_per_user: 50000
+  # Label explosion prevention
+  max_label_name_length: 1024
+  max_label_value_length: 2048
+  max_label_names_per_series: 30
+  # Query limits
+  max_entries_limit_per_query: 5000
+  max_query_length: 721h  # 30 days
+  max_query_lookback: 0  # No limit (use retention instead)
 
 # Compactor
 compactor:

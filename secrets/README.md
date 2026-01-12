@@ -28,23 +28,9 @@ This directory contains template files for Docker secrets management.
 - Secrets are mounted as read-only in containers
 - File permissions should be 600 (owner read/write only)
 
-## Migration from Environment Variables
+## Optional Migration Input
 
-Old approach (insecure):
-```bash
-# .env file
-GAMING_YOUTUBE_KEY=sk-xxx
-GAMING_TWITCH_KEY=live_xxx
-```
-
-New approach (secure):
-```bash
-# secrets/gaming_youtube_key.txt
-sk-xxx
-
-# secrets/gaming_twitch_key.txt
-live_xxx
-```
+If you previously stored keys in `.env`, use `./init_secrets.sh` to convert them once, then archive/remove `.env`. Runtime reads **only** Docker secrets.
 
 ## Secrets Naming Convention
 
